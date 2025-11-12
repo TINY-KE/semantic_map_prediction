@@ -18,7 +18,7 @@ class TrainOptions(BaseOptions):
         gen.add_argument('--resume', dest='resume', default=False,
                          action='store_true',
                          help='Resume from checkpoint (Use latest checkpoint by default')
-        gen.add_argument('--num_workers', type=int, default=4,
+        gen.add_argument('--num_workers', type=int, default=3,
                          help='Number of processes used for data loading')
         pin = gen.add_mutually_exclusive_group()
         pin.add_argument('--pin_memory', dest='pin_memory', action='store_true',

@@ -75,6 +75,7 @@ class SemMapTester(object):
 
     def test_semantic_map(self):
         # 1. 数据加载器
+        print("     [zhjd-debug], params test_batch_size: ", self.options.test_batch_size, ", num_workers:", self.options.num_workers)
         test_data_loader = DataLoader(self.test_ds,
                                       # 这是数据集（Dataset）对象，表示测试数据集。它通常是一个继承自 torch.utils.data.Dataset 类的自定义类，用来定义如何加载和预处理数据。
                                       # self.test_ds 中包含了测试数据的所有样本和标签，并实现了如何在 __getitem__ 方法中获取一个样本。
@@ -85,6 +86,7 @@ class SemMapTester(object):
         # 2. 初始化变量
         batch = None
         self.options.test_iters = len(test_data_loader) # the length of dataloader depends on the batch size
+        print("   [zhjd-debug] self.options.test_iters : ", self.options.test_iters )
         object_labels = list(range(self.options.n_object_classes))
         spatial_labels = list(range(self.options.n_spatial_classes))
         overall_confusion_matrix_objects, overall_confusion_matrix_spatial = None, None
@@ -96,7 +98,9 @@ class SemMapTester(object):
                                            desc='Testing',
                                            total=self.options.test_iters)):
             # ep_name = batch['name']
+            # print("   [zhjd-debug] batch: ", batch.size())
 
+            # 用于把一个 batch（批次数据）移动到 GPU，同时跳过不需要放上 GPU 的字段。
             batch = {k: v.to(self.device) for k, v in batch.items() if k != 'name'}
 
             # 4. 模型推理（Ensemble 集成模型）
@@ -104,24 +108,28 @@ class SemMapTester(object):
                 # # 获取 ground truth
                 gt_crops_spatial = batch['gt_grid_crops_spatial'].cpu()  # B x T x 1 x cH x cW
                 gt_crops_objects = batch['gt_grid_crops_objects'].cpu()  # B x T x 1 x cH x cW
+                print("   [zhjd-debug] gt_crops_objects.shape: ", gt_crops_objects.shape)
 
                 # # 初始化 ensemble 输出列表
                 ensemble_object_maps, ensemble_spatial_maps = [], []
                 N = len(self.models_dict) # numbers of models in the ensemble
+                print("   [zhjd-debug] range(self.options.ensemble_size): ", range(self.options.ensemble_size))
                 for n in range(self.options.ensemble_size):
                     pred_output = self.models_dict[n]['predictor_model'](batch)
                     ensemble_object_maps.append(pred_output['pred_maps_objects'].clone())
 
                 # 5. 集成模型平均预测
                 ensemble_object_maps = torch.stack(ensemble_object_maps)  # N x B x T x C x cH x cW
+                print("   [zhjd-debug] ensemble_object_maps.shape: ", ensemble_object_maps.shape)
 
-                step_ego_grid_27 = batch['step_ego_grid_27']
-                viz_utils.show_image_color_and_extract(step_ego_grid_27,"Predicted Map L2M", 27)
                 # Getting the mean predictions from the ensemble
                 pred_maps_objects = torch.mean(ensemble_object_maps, dim=0)  # B x T x C x cH x cW
                 print("   [zhjd-debug] pred_maps_objects.shape: ", pred_maps_objects.shape)
-                viz_utils.show_image_color_and_extract(pred_maps_objects,"Predicted Map RSMP", 27)
-                viz_utils.show_image_sseg_2d_label(gt_crops_objects, "GT")
+                # step_ego_grid_27 = batch['step_ego_grid_27']
+                # viz_utils.show_image_color_and_extract(step_ego_grid_27,"Predicted Map L2M", 27)
+                # viz_utils.show_image_color_and_extract(pred_maps_objects,"Predicted Map RSMP", 27)
+                # viz_utils.show_image_sseg_2d_label(gt_crops_objects, "GT")
+
 
                 # Decide label for each location based on predition probs
                 pred_labels_objects = torch.argmax(pred_maps_objects.cpu(), dim=2, keepdim=True) # B x T x 1 x cH x cW

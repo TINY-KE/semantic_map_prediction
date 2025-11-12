@@ -234,7 +234,10 @@ if __name__ == "__main__":
         exit(1)
 
     data = np.load(ep_path)
-    print(data.files)
+    print("NPZ内包含：",data.files)
+    for k in data.files:
+        print(f"{k}: shape = {data[k].shape}")
+
     # work1: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs']
     # work2: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
     # models/predictors/map_predictor_model.py 中的唯一输入是step_ego_grid_27, 这也是work1的输出。
@@ -247,18 +250,18 @@ if __name__ == "__main__":
     print(f"{'step_ego_grid_crops_spatial shape:':<35} {data['step_ego_grid_crops_spatial'].shape}")
     print(f"{'step_ego_grid_27 shape:':<35} {data['step_ego_grid_27'].shape}")
 
-    # 选择具体的时间步和栅格位置
-    step_ego_grid_27 = data['step_ego_grid_27']
-    time_step = 5  # 第1个时间步（0-9）
-    grid_y = 22  # y坐标（0-63，选择中间位置）
-    grid_x = 12  # x坐标（0-63，选择中间位置）
-    # 提取该栅格上27个类别的概率值
-    # 1. 直接打印所有27个数值
-    for time in range(0, 10):
-        probabilities = step_ego_grid_27[time, :, grid_y, grid_x]
-        print("27个类别的概率值:")
-        for i, prob in enumerate(probabilities):
-            print(f"类别 {i:2d}: {prob:.6f}")
+    # # 选择具体的时间步和栅格位置
+    # step_ego_grid_27 = data['step_ego_grid_27']
+    # time_step = 5  # 第1个时间步（0-9）
+    # grid_y = 22  # y坐标（0-63，选择中间位置）
+    # grid_x = 12  # x坐标（0-63，选择中间位置）
+    # # 提取该栅格上27个类别的概率值
+    # # 1. 直接打印所有27个数值
+    # for time in range(0, 10):
+    #     probabilities = step_ego_grid_27[time, :, grid_y, grid_x]
+    #     print("27个类别的概率值:")
+    #     for i, prob in enumerate(probabilities):
+    #         print(f"类别 {i:2d}: {prob:.6f}")
 
 
     dataset = ObjNavEpisodeDataset([ep_path])

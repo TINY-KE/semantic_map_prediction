@@ -72,11 +72,17 @@ class HabitatDataOfflineMPv2(Dataset):
         # print('ep file dir: ', ep_file)
         # print('sample_name: ', sample_name)
 
-        abs_pose = ep['abs_pose'][-4:]
-        ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-4:])
-        step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-4:])
-        gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-4:])
-        gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-4:])
+        time_nums = 9
+        # abs_pose = ep['abs_pose'][-4:]
+        # ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-4:])
+        # step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-4:])
+        # gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-4:])
+        # gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-4:])
+        abs_pose = ep['abs_pose'][-time_nums:]
+        ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-time_nums:])
+        step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-time_nums:])
+        gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-time_nums:])
+        gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-time_nums:])
 
         # Transform abs_pose to rel_pose
         rel_pose = []
@@ -92,11 +98,16 @@ class HabitatDataOfflineMPv2(Dataset):
         item['gt_grid_crops_spatial'] = gt_grid_crops_spatial  # Long tensor, int64
         item['gt_grid_crops_objects'] = gt_grid_crops_objects  # Long tensor, int64
 
-        item['images'] = torch.from_numpy(ep['images'][-4:])  # T x 3 x H x W # images are already pre-processed
-        item['gt_segm'] = torch.from_numpy(ep['ssegs'][-4:]).type(torch.int64)  # T x 1 x H x W
-        item['depth_imgs'] = torch.from_numpy(ep['depth_imgs'][-4:])  # T x 1 x H x W
-        item['pred_ego_crops_sseg'] = torch.from_numpy(ep['pred_ego_crops_sseg'][-4:])
-        item['step_ego_grid_27'] = torch.from_numpy(ep['step_ego_grid_27'][-4:])
+        # item['images'] = torch.from_numpy(ep['images'][-4:])  # T x 3 x H x W # images are already pre-processed
+        # item['gt_segm'] = torch.from_numpy(ep['ssegs'][-4:]).type(torch.int64)  # T x 1 x H x W
+        # item['depth_imgs'] = torch.from_numpy(ep['depth_imgs'][-4:])  # T x 1 x H x W
+        # item['pred_ego_crops_sseg'] = torch.from_numpy(ep['pred_ego_crops_sseg'][-4:])
+        # item['step_ego_grid_27'] = torch.from_numpy(ep['step_ego_grid_27'][-4:])
+        item['images'] = torch.from_numpy(ep['images'][-time_nums:])  # T x 3 x H x W # images are already pre-processed
+        item['gt_segm'] = torch.from_numpy(ep['ssegs'][-time_nums:]).type(torch.int64)  # T x 1 x H x W
+        item['depth_imgs'] = torch.from_numpy(ep['depth_imgs'][-time_nums:])  # T x 1 x H x W
+        item['pred_ego_crops_sseg'] = torch.from_numpy(ep['pred_ego_crops_sseg'][-time_nums:])
+        item['step_ego_grid_27'] = torch.from_numpy(ep['step_ego_grid_27'][-time_nums:])
 
         # if self.img_segm:
         #     if self.finetune:
@@ -756,7 +767,7 @@ class HabitatDataScenev2_nouse(Dataset):
 
 # TODO: 原文程序沒用上
 # sequence len 10
-class HabitatDataOfflinev2(Dataset):
+class HabitatDataOfflinev2_nouse(Dataset):
 
     def __init__(self, options, config_file, img_segm=False, finetune=False):
         config = get_config(config_file)
