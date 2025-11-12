@@ -61,6 +61,38 @@ label_conversion_40_27 = {-1:0, 0:0, 1:15, 2:17, 3:1, 4:2, 5:3, 6:18, 7:19, 8:4,
 
 
 # BGR  # wacv 20230823 the note for the color is wrong!
+# color_mapping_27 = {
+#     0:(255,255,255), # white
+#     1:(128,128,0), # olive (dark yellow)
+#     2:(0,0,255), # blue
+#     3:(255,0,0), # red
+#     4:(255,0,255), # magenta
+#     5:(0,255,255), # cyan
+#     6:(255,165,0), # orange
+#     7:(255,255,0), # yellow
+#     8:(128,128,128), # gray
+#     9:(128,0,0), # maroon
+#     10:(255,20,147), # pink
+#     11:(0,128,0), # dark green
+#     12:(128,0,128), # purple
+#     13:(0,128,128), # teal
+#     14:(0,0,128), # navy (dark blue)
+#     15:(210,105,30), # chocolate
+#     16:(188,143,143), # rosy brown
+#     # 17:(0,255,0), # green
+#     # 17: (217, 239, 226),  # light green1
+#     17: (179, 224, 197),  # light green2
+#     # 17: (229, 195, 156),  # light blue
+#     18:(255,215,0), # gold
+#     19:(0,0,0), # black
+#     20:(192,192,192), # silver
+#     21:(138,43,226), # blue violet
+#     22:(255,127,80), # coral
+#     23:(238,130,238), # violet
+#     24:(245,245,220), # beige
+#     25:(139,69,19), # saddle brown
+#     26:(64,224,208) # turquoise
+# }
 color_mapping_27 = {
     0:(255,255,255), # white
     1:(128,128,0), # olive (dark yellow)
@@ -72,17 +104,14 @@ color_mapping_27 = {
     7:(255,255,0), # yellow
     8:(128,128,128), # gray
     9:(128,0,0), # maroon
-    10:(255,20,147), # pink 
+    10:(255,20,147), # pink
     11:(0,128,0), # dark green
     12:(128,0,128), # purple
     13:(0,128,128), # teal
     14:(0,0,128), # navy (dark blue)
     15:(210,105,30), # chocolate
     16:(188,143,143), # rosy brown
-    # 17:(0,255,0), # green
-    # 17: (217, 239, 226),  # light green1
-    17: (179, 224, 197),  # light green2
-    # 17: (229, 195, 156),  # light blue
+    17:(100,255,100), # green
     18:(255,215,0), # gold
     19:(0,0,0), # black
     20:(192,192,192), # silver
@@ -93,6 +122,7 @@ color_mapping_27 = {
     25:(139,69,19), # saddle brown
     26:(64,224,208) # turquoise
 }
+
 
 # three label classification (0:void, 1:occupied, 2:free)
 label_conversion_40_3 = {-1:0, 0:0, 1:1, 2:2, 3:1, 4:1, 5:1, 6:1, 7:1, 8:1, 9:1, 10:1, 11:1, 12:1, 13:1, 14:1, 15:1, 16:2, 17:2,
@@ -304,3 +334,101 @@ def display_sample(rgb_obs, depth_obs, sseg_img=None, savepath=None):
 
 
 
+
+
+
+
+# zhjd
+def add_border(img, color=(255, 0, 0), thickness=5):
+    # 如果是 (C,H,W)，转为 (H,W,C)
+    if img.ndim == 3 and img.shape[0] == 3:
+        img = img.permute(1, 2, 0)
+
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+
+    img = (img * 255).astype(np.uint8) if img.max() <= 1 else img.copy()
+
+    h, w, c = img.shape
+    img[:thickness, :, :] = color  # top
+    img[-thickness:, :, :] = color  # bottom
+    img[:, :thickness, :] = color  # left
+    img[:, -thickness:, :] = color  # right
+    return img
+
+def to_5d(t):
+    t = torch.tensor(t)
+    while t.ndim < 5:
+        t = t.unsqueeze(0)  # 在最前面添加一个新维度。例如原来是 (64, 64) → 变成 (1, 64, 64)
+    return t
+
+fix_extract = 1
+
+# === 用 colorize_grid 上色 ===
+def color_and_extract(grid, color_mapping):
+    colorized = colorize_grid(to_5d(grid), color_mapping=color_mapping)
+    # 输出可能是 (3,H,W) 或 (1,3,H,W) 或 (1,1,3,H,W)
+    colorized = torch.tensor(colorized)
+    # 将五/四维度转为三维度
+    if colorized.ndim == 5:
+        colorized = colorized[0, fix_extract]  # 默认显示的是第二维（time）的第 0 帧。
+    elif colorized.ndim == 4:
+        colorized = colorized[fix_extract]
+    # 现在 colorized 应为 (3,H,W)
+    colorized.permute(1, 2, 0) # 转为 (H,W,3)
+    colorized_border = add_border(colorized, color=(10, 10, 10), thickness=1)
+    return colorized_border
+
+def show_image_color_and_extract(tensor_or_array, title="image", color_mapping=27):
+    if isinstance(tensor_or_array, torch.Tensor):
+        img = tensor_or_array.detach().cpu().numpy()
+    else:
+        img = np.array(tensor_or_array)
+    img = color_and_extract(img, color_mapping=color_mapping)
+    plt.imshow(img)
+    plt.title(title)
+    plt.axis('off')
+    plt.show()
+
+def show_image(tensor_or_array, title="image"):
+    if isinstance(tensor_or_array, torch.Tensor):
+        img = tensor_or_array.detach().cpu().numpy()
+    else:
+        img = np.array(tensor_or_array)
+    if img.ndim == 3 and img.shape[0] in [1, 3]:
+        img = np.transpose(img, (1, 2, 0))
+    plt.imshow(img)
+    plt.title(title)
+    plt.axis('off')
+    plt.show()
+
+
+def show_image_sseg_2d_label(tensor_or_array, title="image"):
+
+    if isinstance(tensor_or_array, torch.Tensor):
+        img = tensor_or_array.detach().cpu().numpy()
+    else:
+        img = np.array(tensor_or_array)
+
+    # 2️⃣ 确保是二维标签图 [H,W]
+    # assert img.ndim == 2, f" [zhjd-debug] Expected 2D label map, got shape {img.shape}"
+    if img.ndim == 5:
+        img = img[0, fix_extract, 0]  # 默认显示的是第二维（time）的第 0 帧。
+    elif img.ndim == 4:
+        img = img[0, fix_extract]
+    elif img.ndim == 4:
+        img = img[fix_extract]
+
+    H, W = img.shape
+    rgb_img = np.zeros((H, W, 3), dtype=np.uint8)
+
+    # 3️⃣ 将每个 label 转成 RGB
+    for lbl, color in color_mapping_27.items():
+        mask = img == lbl
+        rgb_img[mask] = color
+
+    # 4️⃣ 显示结果
+    plt.imshow(rgb_img)
+    plt.title(title)
+    plt.axis('off')
+    plt.show()

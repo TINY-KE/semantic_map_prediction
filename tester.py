@@ -43,6 +43,7 @@ class SemMapTester(object):
         for n in range(self.options.ensemble_size):
             # self.models_dict[n] = {'predictor_model': get_predictor_from_options(self.options)}
 
+            print("     [zhjd-debug] SemMapTester Init predictor_model ...")
             self.models_dict[n] = {'predictor_model': get_predictor(self.options)}
             self.models_dict[n] = {k:v.to(self.device) for k,v in self.models_dict[n].items()}
 
@@ -73,7 +74,7 @@ class SemMapTester(object):
         self.results_spatial['spatial_all'] = {}
 
     def test_semantic_map(self):
-        # 数据加载器
+        # 1. 数据加载器
         test_data_loader = DataLoader(self.test_ds,
                                       # 这是数据集（Dataset）对象，表示测试数据集。它通常是一个继承自 torch.utils.data.Dataset 类的自定义类，用来定义如何加载和预处理数据。
                                       # self.test_ds 中包含了测试数据的所有样本和标签，并实现了如何在 __getitem__ 方法中获取一个样本。
@@ -81,14 +82,14 @@ class SemMapTester(object):
                                 num_workers=self.options.num_workers,
                                 pin_memory=self.options.pin_memory,
                                 shuffle=self.options.shuffle_test)
-        # 一些初始化
+        # 2. 初始化变量
         batch = None
         self.options.test_iters = len(test_data_loader) # the length of dataloader depends on the batch size
         object_labels = list(range(self.options.n_object_classes))
         spatial_labels = list(range(self.options.n_spatial_classes))
         overall_confusion_matrix_objects, overall_confusion_matrix_spatial = None, None
 
-        # 遍历测试数据集
+        # 3. 遍历测试数据集
         # tstep：当前批次的索引（从 0 开始），通常用于跟踪训练或测试的进度。
         # batch：包含当前批次数据的字典或张量，通常包括输入数据（如图像）和目标标签（如标签图像或类标签）。在循环中，batch 会被用于模型推理或计算损失。
         for tstep, batch in enumerate(tqdm(test_data_loader,   # tqdm 会显示当前进度、每秒处理的批次数以及估计的剩余时间。
@@ -98,6 +99,7 @@ class SemMapTester(object):
 
             batch = {k: v.to(self.device) for k, v in batch.items() if k != 'name'}
 
+            # 4. 模型推理（Ensemble 集成模型）
             with torch.no_grad():
                 # # 获取 ground truth
                 gt_crops_spatial = batch['gt_grid_crops_spatial'].cpu()  # B x T x 1 x cH x cW
@@ -110,15 +112,21 @@ class SemMapTester(object):
                     pred_output = self.models_dict[n]['predictor_model'](batch)
                     ensemble_object_maps.append(pred_output['pred_maps_objects'].clone())
 
+                # 5. 集成模型平均预测
                 ensemble_object_maps = torch.stack(ensemble_object_maps)  # N x B x T x C x cH x cW
 
+                step_ego_grid_27 = batch['step_ego_grid_27']
+                viz_utils.show_image_color_and_extract(step_ego_grid_27,"Predicted Map L2M", 27)
                 # Getting the mean predictions from the ensemble
                 pred_maps_objects = torch.mean(ensemble_object_maps, dim=0)  # B x T x C x cH x cW
-
+                print("   [zhjd-debug] pred_maps_objects.shape: ", pred_maps_objects.shape)
+                viz_utils.show_image_color_and_extract(pred_maps_objects,"Predicted Map RSMP", 27)
+                viz_utils.show_image_sseg_2d_label(gt_crops_objects, "GT")
 
                 # Decide label for each location based on predition probs
                 pred_labels_objects = torch.argmax(pred_maps_objects.cpu(), dim=2, keepdim=True) # B x T x 1 x cH x cW
 
+                # 6. 混淆矩阵计算
                 current_confusion_matrix_objects = confusion_matrix(y_true=gt_crops_objects.flatten(), y_pred=pred_labels_objects.flatten(), labels=object_labels)
                 current_confusion_matrix_objects = torch.tensor(current_confusion_matrix_objects)
 
@@ -127,7 +135,7 @@ class SemMapTester(object):
                 else:
                     overall_confusion_matrix_objects += current_confusion_matrix_objects
 
-
+        # 7. 计算指标（metrics）
         mAcc_obj = metrics.overall_pixel_accuracy(overall_confusion_matrix_objects)
         class_mAcc_obj, per_class_Acc = metrics.per_class_pixel_accuracy(overall_confusion_matrix_objects)
         mIoU_obj, per_class_IoU = metrics.jaccard_index(overall_confusion_matrix_objects)

@@ -229,7 +229,7 @@ class HabitatDataImgSegm(HabitatDataOffline):
 # TODO: 原文程序沒用上
 # Loads the simulator and episodes separately
 # to enable per_scene collection of data
-class HabitatDataScene(Dataset):
+class HabitatDataScene_nouse(Dataset):
     def __init__(self, options, config_file, scene_id, existing_episode_list=[]):
         self.scene_id = scene_id
 
@@ -446,7 +446,7 @@ class HabitatDataScene(Dataset):
 
 # TODO: zhjd:原程序没用上
 # Generate segmentation and step_ego_grid_crops_objects
-class HabitatDataScenev2(Dataset):
+class HabitatDataScenev2_nouse(Dataset):
     def __init__(self, options, config_file, scene_id, existing_episode_list=[]):
         self.scene_id = scene_id
 

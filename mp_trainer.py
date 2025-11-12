@@ -13,6 +13,8 @@ import datasets.util.viz_utils as viz_utils
 import datasets.util.map_utils as map_utils
 from sklearn.metrics import confusion_matrix
 import metrics
+import os
+import test_utils as tutils
 
 
 class MP_TrainerAM(BaseTrainer):
@@ -40,6 +42,17 @@ class MP_TrainerAM(BaseTrainer):
         print("Using ", torch.cuda.device_count(), "gpus")
         for k in self.models_dict:
             self.models_dict[k] = nn.DataParallel(self.models_dict[k])
+
+        # 加载旧权重
+        init_flag = False
+        if init_flag:
+            ensemble_exp = os.listdir(
+                self.options.ensemble_dir)  # ensemble_dir should be a dir that holds multiple experiments
+            ensemble_exp.sort()  # in case the models are numbered put them in order
+            checkpoint_dir = self.options.ensemble_dir + "/" + ensemble_exp[0]
+            print('     [zhjd-debug] checkpoint_dir: ', checkpoint_dir)
+            latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
+            self.models_dict = tutils.load_model(models=self.models_dict, checkpoint_file=latest_checkpoint)
 
         self.optimizers_dict = {}
         for model in self.models_dict:

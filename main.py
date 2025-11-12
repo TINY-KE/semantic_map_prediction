@@ -20,5 +20,6 @@ if __name__ == '__main__':
     else:
         if options.sem_map_test:
             tester = SemMapTester(options)
+            print("     [zhjd-debug] Testing semantic map...")
             tester.test_semantic_map()
 
