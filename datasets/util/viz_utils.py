@@ -362,7 +362,7 @@ def to_5d(t):
         t = t.unsqueeze(0)  # 在最前面添加一个新维度。例如原来是 (64, 64) → 变成 (1, 64, 64)
     return t
 
-fix_extract = 1
+fix_extract = 0
 
 # === 用 colorize_grid 上色 ===
 def color_and_extract(grid, color_mapping):
@@ -432,3 +432,102 @@ def show_image_sseg_2d_label(tensor_or_array, title="image"):
     plt.title(title)
     plt.axis('off')
     plt.show()
+
+
+
+def save_all_infos_and_mapprediction(batch, pred_maps_objects, savepath, name):
+    # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
+    abs_pose = batch['abs_pose']
+
+    images = batch['images']
+    ssegs = batch['gt_segm']  # 物体分割真值
+    depth_imgs = batch['depth_imgs']
+    pred_ego_crops_sseg = batch['pred_ego_crops_sseg']  # net3的输出
+
+    step_ego_grid_27 = batch['step_ego_grid_27']
+    ##### RSMP的输出 pred_maps_objects
+    gt_grid_crops_objects = batch['gt_grid_crops_objects']
+
+    ego_grid_crops_spatial = batch['ego_grid_crops_spatial']  # 当前帧几何地图
+    step_ego_grid_crops_spatial = batch['step_ego_grid_crops_spatial']  # 多帧融合几何地图
+    gt_grid_crops_spatial = batch['gt_grid_crops_spatial']  # 语义地图真值
+
+    B, T, _, cH, cW = step_ego_grid_27.shape
+    for t in range(T):
+        print(f"🕒 时间步 {t}")
+        images_single = images[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        ssegs_single = ssegs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        depth_imgs_single = depth_imgs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+
+        step_ego_grid_27_single = color_and_extract(step_ego_grid_27[0, t, :, :, :], 27)
+        pred_maps_objects_single = color_and_extract(pred_maps_objects[0, t, :, :, :], 27)
+        gt_grid_crops_objects_single = color_and_extract(gt_grid_crops_objects[0, t, :, :, :], 27)
+
+        ego_grid_crops_spatial_single = color_and_extract(ego_grid_crops_spatial[0, t, :, :, :], 3)
+        step_ego_grid_crops_spatial_single = color_and_extract(step_ego_grid_crops_spatial[0, t, :, :, :], 3)
+        gt_grid_crops_spatial_single = color_and_extract(gt_grid_crops_spatial[0, t, :, :, :], 3)
+
+        # fig, axs = plt.subplots(3, 3, figsize=(20, 20))
+        # axs = axs.flatten()
+        #
+        # axs[0].imshow(images_single)
+        # axs[0].set_title("RGB Image")
+        #
+        # axs[1].imshow(ssegs_single, cmap='tab20')
+        # axs[1].set_title("GT Segmentation")
+        #
+        # axs[2].imshow(depth_imgs_single, cmap='viridis')
+        # axs[2].set_title("Depth")
+        #
+        # axs[3].imshow(step_ego_grid_27_single, cmap='viridis')
+        # axs[3].set_title("RGB Project")
+        #
+        # axs[4].imshow(pred_maps_objects_single, cmap='viridis')
+        # axs[4].set_title("Refined Semantic Map")
+        #
+        # axs[5].imshow(gt_grid_crops_objects_single, cmap='viridis')
+        # axs[5].set_title("GT Semantic Map")
+        #
+        # axs[6].imshow(ego_grid_crops_spatial_single, cmap='viridis')
+        # axs[6].set_title("Depth Project")
+        #
+        # axs[7].imshow(step_ego_grid_crops_spatial_single, cmap='viridis')
+        # axs[7].set_title("Refined Occupied Map")
+        #
+        # axs[8].imshow(gt_grid_crops_spatial_single, cmap='viridis')
+        # axs[8].set_title("GT Occupied Map")
+        #
+        # for ax in axs:
+        #     ax.axis('off')
+        #
+        # plt.tight_layout()
+        # plt.show()
+
+        # === 九宫格保存本地===
+        fig, axs = plt.subplots(3, 3, figsize=(20, 20))
+        axs = axs.flatten()
+
+        imgs = [
+            (images_single, "RGB Image", None),
+            (ssegs_single, "GT Segmentation", 'tab20'),
+            (depth_imgs_single, "Depth", 'viridis'),
+            (step_ego_grid_27_single, "RGB Project", None),
+            (pred_maps_objects_single, "Refined Semantic Map", None),
+            (gt_grid_crops_objects_single, "GT Semantic Map", None),
+            (ego_grid_crops_spatial_single, "Depth Project", None),
+            (step_ego_grid_crops_spatial_single, "Refined Occupied Map", None),
+            (gt_grid_crops_spatial_single, "GT Occupied Map", None)
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(savepath, f"{name}_t{t}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+        print(f"✅ 已保存: {save_file}")

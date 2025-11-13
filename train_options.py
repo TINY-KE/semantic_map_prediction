@@ -154,3 +154,14 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--ensemble_size', type=int, dest='ensemble_size', default=1)
 
 
+        # zhjd
+        self.parser.add_argument('--save_nav_images', dest='save_nav_images', action='store_true',
+                                 help='Keep track and store maps during navigation testing')
+
+        self.parser.add_argument(
+            '--save_img_dir',
+            type=str,
+            dest='save_img_dir',
+            default='/home/robotlab/semantic-map-prediction/zhjd_save_imgs/',
+            help='Directory to save navigation visualization images when --save_nav_images is enabled'
+        )

@@ -130,11 +130,19 @@ class SemMapTester(object):
                 # viz_utils.show_image_color_and_extract(pred_maps_objects,"Predicted Map RSMP", 27)
                 # viz_utils.show_image_sseg_2d_label(gt_crops_objects, "GT")
 
-
                 # Decide label for each location based on predition probs
                 pred_labels_objects = torch.argmax(pred_maps_objects.cpu(), dim=2, keepdim=True) # B x T x 1 x cH x cW
 
-                # 6. 混淆矩阵计算
+                # 6. （可选）可视化保存
+                # Option to save visualizations of steps
+                if self.options.save_nav_images:
+                    save_img_dir_ = self.options.save_img_dir + '/ep_' + str(tstep)  + '/'
+                    print("     [zhjd-debug] save_img_dir_: ", save_img_dir_)
+                    if not os.path.exists(save_img_dir_):
+                        os.makedirs(save_img_dir_)
+                    viz_utils.save_all_infos_and_mapprediction(batch, pred_maps_objects, savepath=save_img_dir_, name='path')
+
+                # 7. 混淆矩阵计算
                 current_confusion_matrix_objects = confusion_matrix(y_true=gt_crops_objects.flatten(), y_pred=pred_labels_objects.flatten(), labels=object_labels)
                 current_confusion_matrix_objects = torch.tensor(current_confusion_matrix_objects)
 

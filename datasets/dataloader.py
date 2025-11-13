@@ -72,7 +72,7 @@ class HabitatDataOfflineMPv2(Dataset):
         # print('ep file dir: ', ep_file)
         # print('sample_name: ', sample_name)
 
-        time_nums = 9
+        time_nums = 10
         # abs_pose = ep['abs_pose'][-4:]
         # ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-4:])
         # step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-4:])
