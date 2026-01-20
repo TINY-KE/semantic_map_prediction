@@ -42,29 +42,29 @@ class ObjNavEpisodeDataset(Dataset):
         ep = np.load(ep_file)
 
         abs_pose = ep['abs_pose'][-10:]
-        ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-10:])
-        step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-10:])
-        gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-10:])
-        gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-10:])
+        # ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-10:])
+        # step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-10:])
+        # gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-10:])
+        # gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-10:])
 
-        # 计算相对位姿
-        rel_pose = []
-        for i in range(abs_pose.shape[0]):
-            rel_pose.append(utils.get_rel_pose(pos2=abs_pose[i], pos1=abs_pose[0]))
+        # # 计算相对位姿
+        # rel_pose = []
+        # for i in range(abs_pose.shape[0]):
+        #     rel_pose.append(utils.get_rel_pose(pos2=abs_pose[i], pos1=abs_pose[0]))
 
         item = {
-            'pose': torch.from_numpy(np.asarray(rel_pose)).float(),
+            # 'pose': torch.from_numpy(np.asarray(rel_pose)).float(),
             'abs_pose': torch.from_numpy(abs_pose).float(),
-            'ego_grid_crops_spatial': ego_grid_crops_spatial,
-            'step_ego_grid_crops_spatial': step_ego_grid_crops_spatial,
-            'gt_grid_crops_spatial': gt_grid_crops_spatial,
-            'gt_grid_crops_objects': gt_grid_crops_objects,
+            # 'ego_grid_crops_spatial': ego_grid_crops_spatial,
+            # 'step_ego_grid_crops_spatial': step_ego_grid_crops_spatial,
+            # 'gt_grid_crops_spatial': gt_grid_crops_spatial,
+            # 'gt_grid_crops_objects': gt_grid_crops_objects,
 
             'images': torch.from_numpy(ep['images'][-10:]),
             'gt_segm': torch.from_numpy(ep['ssegs'][-10:]).type(torch.int64),
             'depth_imgs': torch.from_numpy(ep['depth_imgs'][-10:]),
 
-            'pred_ego_crops_sseg': torch.from_numpy(ep['pred_ego_crops_sseg'][-10:]),
+            # 'pred_ego_crops_sseg': torch.from_numpy(ep['pred_ego_crops_sseg'][-10:]),
             'step_ego_grid_27': torch.from_numpy(ep['step_ego_grid_27'][-10:])
         }
 
@@ -132,14 +132,15 @@ def visualize_all_fields_colorized(item, timestep=0):
     """
 
     # === 取数据 ===
-    rgb = normalize_rgb(item['images'][timestep]).transpose(1, 2, 0)
+    # rgb = normalize_rgb(item['images'][timestep]).transpose(1, 2, 0)
+    rgb = normalize_rgb(item['images'][timestep])
     segm = tensor_to_np(item['gt_segm'][timestep])
     depth = tensor_to_np(item['depth_imgs'][timestep])
-    pred_semantic_grid_map = tensor_to_np(item['pred_ego_crops_sseg'][timestep])
-    ego_spatial = tensor_to_np(item['ego_grid_crops_spatial'][timestep])
-    step_ego_spatial = tensor_to_np(item['step_ego_grid_crops_spatial'][timestep])
-    gt_spatial = tensor_to_np(item['gt_grid_crops_spatial'][timestep])
-    gt_objects = tensor_to_np(item['gt_grid_crops_objects'][timestep])
+    # pred_semantic_grid_map = tensor_to_np(item['pred_ego_crops_sseg'][timestep])
+    # ego_spatial = tensor_to_np(item['ego_grid_crops_spatial'][timestep])
+    # step_ego_spatial = tensor_to_np(item['step_ego_grid_crops_spatial'][timestep])
+    # gt_spatial = tensor_to_np(item['gt_grid_crops_spatial'][timestep])
+    # gt_objects = tensor_to_np(item['gt_grid_crops_objects'][timestep])
     step_grid_27 = tensor_to_np(item['step_ego_grid_27'][timestep])
 
     # # === 如果预测语义是 C×H×W，取 argmax ===
@@ -164,15 +165,15 @@ def visualize_all_fields_colorized(item, timestep=0):
         # 现在 colorized 应为 (3,H,W)
         return colorized.permute(1, 2, 0)  # 转为 (H,W,3)
 
-    color_ego_spatial = color_and_extract(ego_spatial, 3)
-    color_step_spatial = color_and_extract(step_ego_spatial, 3)
-    color_gt_spatial = color_and_extract(gt_spatial, 3)
-    color_gt_objects = color_and_extract(gt_objects, 27)
-    color_pred_semantic = color_and_extract(pred_semantic_grid_map, 27)
-    color_step_grid27 = color_and_extract(step_grid_27.argmax(axis=0), 27)
-
+    # color_ego_spatial = color_and_extract(ego_spatial, 3)
+    # color_step_spatial = color_and_extract(step_ego_spatial, 3)
+    # color_gt_spatial = color_and_extract(gt_spatial, 3)
+    # color_gt_objects = color_and_extract(gt_objects, 27)
+    # color_pred_semantic = color_and_extract(pred_semantic_grid_map, 27)
+    # color_step_grid27 = color_and_extract(step_grid_27.argmax(axis=0), 27)
+    color_step_grid27 = viz_utils.colorEncode(step_grid_27.argmax(axis=0))
     # === 绘图 ===
-    fig, axs = plt.subplots(3, 3, figsize=(20, 20))
+    fig, axs = plt.subplots(2, 2, figsize=(20, 20))
     axs = axs.flatten()
 
     axs[0].imshow(rgb)
@@ -188,26 +189,26 @@ def visualize_all_fields_colorized(item, timestep=0):
 
 
 
-    axs[3].imshow(color_pred_semantic)
-    axs[3].set_title("Predicted Semantic ")
+    # axs[3].imshow(color_pred_semantic)
+    # axs[3].set_title("Predicted Semantic ")
 
 
-    axs[4].imshow(color_step_grid27)
-    axs[4].set_title("L2M results Input (step_ego_grid_27)")
+    axs[3].imshow(color_step_grid27)
+    axs[3].set_title("Bayesian Fusion, RSMPNet's Input (step_ego_grid_27)")   # 最关键，RSMPNet的输入，只是通过贝叶斯的融合。因此在这个工作中，不涉及语义分割。
 
-    axs[5].imshow(color_gt_objects)
-    axs[5].set_title("GT Objects ")
+    # axs[5].imshow(color_gt_objects)
+    # axs[5].set_title("GT Objects ")
 
 
 
-    axs[6].imshow(color_ego_spatial)
-    axs[6].set_title("Egocentric Spatial ")
-
-    axs[7].imshow(color_step_spatial)
-    axs[7].set_title("Step Ego Spatial (step_ego_grid_crops_spatial)")
-
-    axs[8].imshow(color_gt_spatial)
-    axs[8].set_title("GT Spatial ")
+    # axs[6].imshow(color_ego_spatial)
+    # axs[6].set_title("Egocentric Spatial ")
+    #
+    # axs[7].imshow(color_step_spatial)
+    # axs[7].set_title("Step Ego Spatial (step_ego_grid_crops_spatial)")
+    #
+    # axs[8].imshow(color_gt_spatial)
+    # axs[8].set_title("GT Spatial ")
 
 
 
@@ -220,6 +221,35 @@ def visualize_all_fields_colorized(item, timestep=0):
     print(f"✅ timestep={timestep} 可视化完成。")
 
 
+object_id_to_name = {
+    0: "void",
+    1: "chair",     # ****
+    2: "door",
+    3: "table",     # ****
+    4: "cushion",
+    5: "sofa",
+    6: "bed",     # ****
+    7: "plant",
+    8: "sink",
+    9: "toilet",
+    10: "tv_monitor",
+    11: "shower",
+    12: "bathtub",
+    13: "counter",
+    14: "appliances",    # 来自 37
+    15: "wall",        # ****   # 映射到 15?（你的数据中 wall 映射到 structure=15, 但 15 > 26，这个不是 object）
+    16: "curtain",      # ****  # 映射到 other=16（也不是 object）
+    17: "stairs/ceiling/free-space",    # **** # 17 free-space 不是 object
+    18: "picture",
+    19: "cabinet",
+    20: "chest_of_drawers",
+    21: "stool",
+    22: "towel",
+    23: "fireplace",
+    24: "gym_equipment",
+    25: "seating",
+    26: "clothes",
+}
 
 # ----------------------------
 # 主函数入口
@@ -227,6 +257,7 @@ def visualize_all_fields_colorized(item, timestep=0):
 if __name__ == "__main__":
     root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
     ep_path = root_path + '/' + 'ep_1_1_2azQ1b91cZZ.npz'
+    ep_path = "/home/robotlab/work/semantic-segmentation-pytorch/save_results/virtual_robot_outputs.npz"
 
     # ep_path = '/home/robotlab/dataset/MP3D_dataset/v1/tasks/mp3d_habitat/NPZ/train/HxpKQynjfin/ep_1_1_HxpKQynjfin.npz'
     if not os.path.exists(ep_path):
@@ -247,32 +278,43 @@ if __name__ == "__main__":
     # 3️⃣ 输出序列长度（时间步数量）
     print("abs_pose 序列长度:", data['abs_pose'].shape[0])
 
-    print(f"{'step_ego_grid_crops_spatial shape:':<35} {data['step_ego_grid_crops_spatial'].shape}")
+    # print(f"{'step_ego_grid_crops_spatial shape:':<35} {data['step_ego_grid_crops_spatial'].shape}")
     print(f"{'step_ego_grid_27 shape:':<35} {data['step_ego_grid_27'].shape}")
 
-    # # 选择具体的时间步和栅格位置
-    # step_ego_grid_27 = data['step_ego_grid_27']
-    # time_step = 5  # 第1个时间步（0-9）
-    # grid_y = 22  # y坐标（0-63，选择中间位置）
-    # grid_x = 12  # x坐标（0-63，选择中间位置）
-    # # 提取该栅格上27个类别的概率值
-    # # 1. 直接打印所有27个数值
-    # for time in range(0, 10):
-    #     probabilities = step_ego_grid_27[time, :, grid_y, grid_x]
-    #     print("27个类别的概率值:")
-    #     for i, prob in enumerate(probabilities):
-    #         print(f"类别 {i:2d}: {prob:.6f}")
-
+    # for t in range(0,10):
+    #     grids = data['step_ego_grid_27'][t]   # shape = [27, 64, 64][0, 0]  # shape = [27, 64, 64]
+    #     # print(f"{'grid shape:':<35} {grids.shape}")  #  (27, 64, 64)
+    #     target = 0.037037037  # 1/27
+    #     threshold = 0.01
+    #     for i in range(0, 64):
+    #         for j in range(0, 64):
+    #             g=grids[:,i,j]
+    #             # 最大值、次大值
+    #             sorted_idx = np.argsort(g)  # 升序
+    #             top1_idx = sorted_idx[-1]  # 最大
+    #             top2_idx = sorted_idx[-2]  # 第二大
+    #
+    #             top1_val = float(g[top1_idx])
+    #             top2_val = float(g[top2_idx])
+    #
+    #             if abs(top1_val - target) > threshold  and abs(top1_val - top2_val) < 0.4:
+    #                 top1_name = object_id_to_name.get(top1_idx, "unknown")
+    #                 top2_name = object_id_to_name.get(top2_idx, "unknown")
+    #
+    #                 g = g * 1e7
+    #                 formatted = " ".join([f"{float(x):.3f}" for x in g])
+    #                 # print(f"({i},{j}), name={top1_name},  p={top1_val:.6f}, \t name={top2_name},  p={top2_val:.6f}, \t p1-p2={top1_val + top2_val}")
+    #                 # print(f"({i},{j}), name={name}, m={m:.6f}, \n \t grids=[{formatted}]")
 
     dataset = ObjNavEpisodeDataset([ep_path])
     item = dataset[0]
 
-    step_ego_crops = item['ego_grid_crops_spatial']
-    T, _, cH, cW = step_ego_crops.shape
-    print(f"T (timesteps): {T}")
-    print(f"C (channels): {_}")
-    print(f"cH (crop height): {cH}")
-    print(f"cW (crop width): {cW}")
+    # step_ego_crops = item['ego_grid_crops_spatial']
+    # T, _, cH, cW = step_ego_crops.shape
+    # print(f"T (timesteps): {T}")
+    # print(f"C (channels): {_}")
+    # print(f"cH (crop height): {cH}")
+    # print(f"cW (crop width): {cW}")
 
     # for t in range(4):
     #     print(f"\n=== 可视化时间步 {t} ===")

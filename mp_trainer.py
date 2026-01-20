@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pytorch_utils.base_trainer import BaseTrainer
 from datasets.dataloader import HabitatDataOfflineMPv2
-from models.predictors import get_predictor
+from models.predictors import get_predictor_rsmp
 import datasets.util.utils as utils
 import datasets.util.viz_utils as viz_utils
 import datasets.util.map_utils as map_utils
@@ -31,7 +31,7 @@ class MP_TrainerAM(BaseTrainer):
         self.train_ds = HabitatDataOfflineMPv2(self.options, config_file=self.options.config_train_file)
         self.test_ds = HabitatDataOfflineMPv2(self.options, config_file=self.options.config_val_file)
 
-        self.predictor_model = get_predictor(self.options)
+        self.predictor_model = get_predictor_rsmp(self.options)
 
         # Init the weights from normal distr with mean=0, std=0.02
         if self.options.init_gaussian_weights:
@@ -47,9 +47,9 @@ class MP_TrainerAM(BaseTrainer):
         init_flag = False
         if init_flag:
             ensemble_exp = os.listdir(
-                self.options.ensemble_dir)  # ensemble_dir should be a dir that holds multiple experiments
+                self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
             ensemble_exp.sort()  # in case the models are numbered put them in order
-            checkpoint_dir = self.options.ensemble_dir + "/" + ensemble_exp[0]
+            checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp[0]
             print('     [zhjd-debug] checkpoint_dir: ', checkpoint_dir)
             latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
             self.models_dict = tutils.load_model(models=self.models_dict, checkpoint_file=latest_checkpoint)

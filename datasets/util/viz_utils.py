@@ -8,6 +8,8 @@ import torch
 from PIL import Image
 from habitat_sim.utils.common import d3_40_colors_rgb
 # import datasets.util.map_utils as map_utils
+import datasets.util.viz_utils as viz_utils
+import cv2
 
 '''
 MP3D original semantic labels and reduced set correspondence
@@ -435,10 +437,8 @@ def show_image_sseg_2d_label(tensor_or_array, title="image"):
 
 
 
-def save_all_infos_and_mapprediction(batch, pred_maps_objects, savepath, name):
+def save_all_infos_and_mapprediction_origin(batch, pred_maps_objects, savepath, name):
     # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
-    abs_pose = batch['abs_pose']
-
     images = batch['images']
     ssegs = batch['gt_segm']  # 物体分割真值
     depth_imgs = batch['depth_imgs']
@@ -531,3 +531,136 @@ def save_all_infos_and_mapprediction(batch, pred_maps_objects, savepath, name):
         plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
         plt.close()
         print(f"✅ 已保存: {save_file}")
+
+
+
+def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, name):
+    # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
+    images = batch['images']
+    ssegs = batch['gt_segm']  # 物体分割真值
+    depth_imgs = batch['depth_imgs']
+    step_ego_grid_27 = batch['step_ego_grid_27']
+
+
+
+    B, T, _, cH, cW = step_ego_grid_27.shape
+    for t in range(T):
+        print(f"🕒 时间步 {t}")
+        # RGB图
+        images_single = images[0, t, :, :, :].detach().cpu().numpy()
+
+        # --- 语义图上色 ---
+        ssegs_single = ssegs[0, t, :, :].detach().cpu().numpy()
+        segm_color = colorize_sseg(ssegs_single, color_mapping_27)
+
+        # 深度图上色
+        depth_imgs_single = depth_imgs[0, t, :, :].detach().cpu().numpy()
+        depth_norm = cv2.normalize(depth_imgs_single, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        depth_color = cv2.applyColorMap(depth_norm, cv2.COLORMAP_JET)  # (H, W, 3)
+
+        # step_ego_grid_27_single = color_and_extract(step_ego_grid_27[0, t, :, :, :], 27)
+        # pred_maps_objects_single = color_and_extract(pred_maps_objects[0, t, :, :, :], 27)  # RSMP的输出 pred_maps_objects
+        step_ego_grid_27_single = colorEncode(step_ego_grid_27[0, t, :, :, :].argmax(axis=0))
+        pred_maps_objects_single = colorEncode(pred_maps_objects[0, t, :, :, :].argmax(axis=0))
+
+
+        # === 六宫格保存本地===
+        fig, axs = plt.subplots(3, 2, figsize=(30, 30))
+        axs = axs.flatten()
+
+        imgs = [
+            (images_single, "RGB Image", None),
+            (ssegs_single, "GT Segmentation", 'tab20'),
+            (depth_imgs_single, "Depth", 'viridis'),
+            (step_ego_grid_27_single, "RGB Project", None),
+            (pred_maps_objects_single, "Refined Semantic Map", None),
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(savepath, f"{name}_t{t}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+        print(f"✅ 已保存: {save_file}")
+
+
+
+# zhjd
+def colorEncode(label_map, color_mapping=color_mapping_27):
+    """
+    将单通道标签图转换为彩色图像（RGB）。
+
+    参数:
+        label_map: numpy.ndarray, shape (H, W)，每个像素是类别 ID
+        color_mapping: dict[int, tuple[int, int, int]]，类别 ID → RGB 颜色
+
+    返回:
+        RGB 图像: numpy.ndarray, shape (H, W, 3)，dtype=uint8
+    """
+    # 保证输入是 numpy，并 squeeze 掉多余维度
+    if isinstance(label_map, torch.Tensor):
+        label_map = label_map.detach().cpu().numpy()
+
+    label_map = np.squeeze(label_map)  # 去掉多余维度，例如 (1, H, W) → (H, W)
+
+    if label_map.ndim != 2:
+        raise ValueError(f"[colorEncode] 输入的 label_map 必须是 2D，但实际是 {label_map.shape}")
+
+    h, w = label_map.shape
+    color_img = np.zeros((h, w, 3), dtype=np.uint8)
+
+    for label_id, color in color_mapping.items():
+        color_img[label_map == label_id] = color
+
+    return color_img
+
+
+
+
+# zhjd
+def colorEncode(label_map):
+    """
+    将单通道标签图转换为彩色图像（RGB）。
+
+    参数:
+        label_map: numpy.ndarray, shape (H, W)，每个像素是类别 ID
+        color_mapping: dict[int, tuple[int, int, int]]，类别 ID → RGB 颜色
+
+    返回:
+        RGB 图像: numpy.ndarray, shape (H, W, 3)，dtype=uint8
+    """
+    color_mapping = color_mapping_27
+
+    # 保证输入是 numpy，并 squeeze 掉多余维度
+    if isinstance(label_map, torch.Tensor):
+        label_map = label_map.detach().cpu().numpy()
+
+    label_map = np.squeeze(label_map)  # 去掉多余维度，例如 (1, H, W) → (H, W)
+
+    if label_map.ndim != 2:
+        raise ValueError(f"[colorEncode] 输入的 label_map 必须是 2D，但实际是 {label_map.shape}")
+
+    h, w = label_map.shape
+    color_img = np.zeros((h, w, 3), dtype=np.uint8)
+
+    for label_id, color in color_mapping.items():
+        color_img[label_map == label_id] = color
+
+    return color_img
+
+
+def colorize_sseg(sseg, color_map):
+    h, w = sseg.shape
+    color_image = np.zeros((h, w, 3), dtype=np.uint8)
+
+    for label_id, color in color_map.items():
+        mask = sseg == label_id
+        color_image[mask] = color
+
+    return color_image

@@ -35,6 +35,7 @@ class HabitatDataOfflineMPv2(Dataset):
         self.episodes_file_list = []
         self.episodes_file_list += self.collect_stored_episodes(options, split=config.DATASET.SPLIT)
 
+        # 默认是1
         if options.dataset_percentage < 1:  # Randomly choose the subset of the dataset to be used
             random.shuffle(self.episodes_file_list)
             self.episodes_file_list = self.episodes_file_list[
@@ -51,6 +52,7 @@ class HabitatDataOfflineMPv2(Dataset):
     # 这个方法遍历指定目录中的所有场景，收集所有 episodes 文件的路径，并将它们返回为 episodes_file_list。
     def collect_stored_episodes(self, options, split):
         episodes_dir = options.stored_episodes_dir + split + "/"
+        print("   [zhjd-debug] episodes_dir: ", episodes_dir )
         episodes_file_list = []
         _scenes_dir = os.listdir(episodes_dir)
 
@@ -68,9 +70,11 @@ class HabitatDataOfflineMPv2(Dataset):
         ep_file = self.episodes_file_list[idx]
 
         ep = np.load(ep_file)
-        sample_name = (ep_file.split('/')[-1]).split('.')[0]
-        # print('ep file dir: ', ep_file)
-        # print('sample_name: ', sample_name)
+        epsoid_name = (ep_file.split('/')[-1]).split('.')[0]
+        scene_id = epsoid_name.split('_')[-1]
+        print('     [zhjd-debug] ep file dir: ', ep_file)
+        print('     [zhjd-debug] scene_id: ', scene_id)
+        print('     [zhjd-debug] epsoid_name: ', epsoid_name)
 
         time_nums = 10
         # abs_pose = ep['abs_pose'][-4:]
@@ -120,7 +124,92 @@ class HabitatDataOfflineMPv2(Dataset):
         #         pred_ego_crops_sseg = torch.from_numpy(ep_imgSegm['pred_ego_crops_sseg'])
         #         item['pred_ego_crops_sseg'] = pred_ego_crops_sseg[-4:]
 
+        item['epsoid_name'] = epsoid_name  # ep_1_1_2azQ1b91cZZ
+        item['scene_id'] = scene_id  # 2azQ1b91cZZ
+
         return item
+
+
+class HabitatDataOfflineSLAM(Dataset):
+    def __init__(self, options, config_file, img_segm=False, finetune=False):
+        config = get_config(config_file)  # TODO: 配置文件在哪？
+        self.config = config
+
+        # self.img_segm = img_segm
+        self.finetune = finetune  # whether we are running a finetuning active job  指定是否进行微调。
+
+        self.episodes_file_list = []
+        self.episodes_file_list += self.collect_stored_episodes(options, split=config.DATASET.SPLIT)
+
+        # 默认是1
+        if options.dataset_percentage < 1:  # Randomly choose the subset of the dataset to be used
+            random.shuffle(self.episodes_file_list)
+            self.episodes_file_list = self.episodes_file_list[
+                                      :int(len(self.episodes_file_list) * options.dataset_percentage)]
+        self.number_of_episodes = len(self.episodes_file_list)
+
+        self.object_labels = options.n_object_classes  # 物体类别数
+        self.episodes_dir = options.stored_episodes_dir  # 存储 episodes 的目录
+
+        # if self.img_segm:
+            # self.episodes_imgSegm_dir = options.stored_imgSegm_episodes_dir
+            # self.episodes_dir = options.stored_episodes_dir
+
+    # 这个方法遍历指定目录中的所有场景，收集所有 episodes 文件的路径，并将它们返回为 episodes_file_list。
+    def collect_stored_episodes(self, options, split):
+        episodes_dir = options.stored_episodes_dir + split + "/"
+        print("   [zhjd-debug-slam] episodes_dir: ", episodes_dir )
+        episodes_file_list = []
+        _scenes_dir = os.listdir(episodes_dir)
+
+        scenes_dir = [x for x in _scenes_dir if os.path.isdir(episodes_dir + x)]
+        for scene in scenes_dir:
+            for fil in os.listdir(episodes_dir + scene + "/"):
+                episodes_file_list.append(episodes_dir + scene + "/" + fil)
+        return episodes_file_list
+
+    def __len__(self):
+        return self.number_of_episodes
+
+    def __getitem__(self, idx):
+        FRAME_INTERVAL = 5  # 每隔多少帧采样一次
+
+        ep_file = self.episodes_file_list[idx]
+        ep = np.load(ep_file)
+        epsoid_name = (ep_file.split('/')[-1]).split('.')[0]
+        scene_id = epsoid_name.split('_')[-1]
+
+        print('     [zhjd-debug-slam] ep file dir: ', ep_file)
+        print('     [zhjd-debug-slam] scene_id: ', scene_id)
+        print('     [zhjd-debug-slam] epsoid_name: ', epsoid_name)
+
+        # 获取时间步总数
+        total_time_steps = ep['step_ego_grid_27'].shape[0]
+
+        # 计算采样后的索引
+        indices = np.arange(0, total_time_steps, FRAME_INTERVAL)
+
+        # 采样相关帧
+        item = {}
+        item['images'] = torch.from_numpy(ep['images'][indices])  # [T', 3, H, W]
+        item['gt_segm'] = torch.from_numpy(ep['ssegs'][indices]).long()  # [T', 1, H, W]
+        item['depth_imgs'] = torch.from_numpy(ep['depth_imgs'][indices])  # [T', 1, H, W]
+        item['step_ego_grid_27'] = torch.from_numpy(ep['step_ego_grid_27'][indices])  # [T', 27, H, W]
+
+        # 位姿也同步采样（如果你后续需要）
+        # abs_pose = ep['virtual_robot_ground_poses'][indices]
+        # rel_pose = 计算相对位姿...
+
+        item['epsoid_name'] = epsoid_name
+        item['scene_id'] = scene_id
+
+        return item
+
+
+
+
+
+
 
 
 class HabitatDataOffline(Dataset):
@@ -151,7 +240,8 @@ class HabitatDataOffline(Dataset):
         episodes_file_list = []
         _scenes_dir = os.listdir(episodes_dir)
 
-        scenes_dir = [x for x in _scenes_dir if os.path.isdir(episodes_dir+x)]
+        # scenes_dir = [x for x in _scenes_dir if os.path.isdir(episodes_dir+x)]
+        scenes_dir = sorted([x for x in _scenes_dir if os.path.isdir(episodes_dir + x)])
         for scene in scenes_dir:
             for fil in os.listdir(episodes_dir+scene+"/"):
                 episodes_file_list.append(episodes_dir+scene+"/"+fil)

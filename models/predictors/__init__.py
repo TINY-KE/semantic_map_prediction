@@ -5,7 +5,7 @@ from models.networks import get_mp_network
 from .map_predictor_model import MapPredictorAM
 
 
-def get_predictor(options):
+def get_predictor_rsmp(options):
     print('--------------------------with_am--------------------------')
     return MapPredictorAM(segmentation_model=get_mp_network(options),
                                   map_loss_scale=options.map_loss_scale)

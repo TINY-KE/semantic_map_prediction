@@ -98,7 +98,7 @@ class TrainOptions(BaseOptions):
                                 default='configs/my_objectnav_mp3d_val.yaml',
                                 help='path to habitat dataset val config file')
 
-        self.parser.add_argument('--ensemble_dir', type=str, dest='ensemble_dir', default=None,
+        self.parser.add_argument('--ensemble_dir_rsmp', type=str, dest='ensemble_dir_rsmp', default=None,
                                 help='Path containing the experiments comprising the ensemble')
 
         self.parser.add_argument('--n_spatial_classes', type=int, default=3, dest='n_spatial_classes',

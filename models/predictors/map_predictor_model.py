@@ -23,8 +23,10 @@ class MapPredictorAM(nn.Module):
 
     def forward(self, batch, is_train=True):
 
-        step_ego_crops = batch['step_ego_grid_crops_spatial']
+        step_ego_crops = batch['step_ego_grid_27']
         B, T, _, cH, cW = step_ego_crops.shape  # batch, sequence length, _, crop height, crop width
+        # print("[zhjd-debug] batch['step_ego_grid_crops_spatial'].size(): ", batch['step_ego_grid_crops_spatial'].size())
+        # print("[zhjd-debug] batch['step_ego_grid_27'].size(): ", batch['step_ego_grid_27'].size())
 
         pred_maps_raw_objects, pred_am = self._segmentation_model(batch['step_ego_grid_27'])
 
