@@ -14,5 +14,10 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
      + 目前只使用了两个参数不同的预测模型
    + 保存四个模型的预测地图
      + 训练一个新模型 【最后再说吧】
-     + 取代论文中图片
+     + python main.py --name train_for_CJME_1 --batch_size 1 --num_workers 1 --is_train --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs  --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_v6/  --num_epochs 50 --ensemble_dir path-model/smp
+     + 新模型保存在 /home/robotlab/semantic-map-prediction/zhjd_logs/train_for_CJME_1/checkpoints
+     + 可视化训练误差 tensorboard --logdir=~/semantic-map-prediction/zhjd_logs/train_for_CJME_1/tensorboard
+     + 取代论文中四个集成模型图片
    + 下一步, 从TbHJrupSAjP、oLBMNvg9in8两个场景中，超出反应target_pred和target_uncertainty的轨迹，加入到论文中
+
+    
