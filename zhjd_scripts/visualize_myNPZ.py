@@ -7,34 +7,35 @@ from torch.utils.data import Dataset
 # ----------------------------
 # 自定义颜色映射（27类）
 # ----------------------------
+
 color_mapping_27 = {
-    0:  (255, 255, 255),  # white
-    1:  (128, 128, 0),    # olive
-    2:  (0, 0, 255),      # blue
-    3:  (255, 0, 0),      # red
-    4:  (255, 0, 255),    # magenta
-    5:  (0, 255, 255),    # cyan
-    6:  (255, 165, 0),    # orange
-    7:  (255, 255, 0),    # yellow
-    8:  (128, 128, 128),  # gray
-    9:  (128, 0, 0),      # maroon
-    10: (255, 20, 147),   # deep pink
-    11: (0, 128, 0),      # dark green
-    12: (128, 0, 128),    # purple
-    13: (0, 128, 128),    # teal
-    14: (0, 0, 128),      # navy
-    15: (210, 105, 30),   # chocolate
-    16: (188, 143, 143),  # rosy brown
-    17: (0, 255, 0),      # green
-    18: (255, 215, 0),    # gold
-    19: (0, 0, 0),        # black
-    20: (192, 192, 192),  # silver
-    21: (138, 43, 226),   # blue violet
-    22: (255, 127, 80),   # coral
-    23: (238, 130, 238),  # violet
-    24: (245, 245, 220),  # beige
-    25: (139, 69, 19),    # saddle brown
-    26: (64, 224, 208)    # turquoise
+    0:  (255, 255, 255),   # 白色 white                       空类别 / 无类别 (void)
+    1:  (128, 128, 0),     # 橄榄色 olive                     椅子 (chair)  ***
+    2:  (0, 0, 255),       # 蓝色 blue                        门 (door)  ***
+    3:  (255, 0, 0),       # 红色 red                         桌子 (table)  ***
+    4:  (255, 0, 255),     # 洋红色 magenta                   靠垫 / 坐垫 (cushion)  ***
+    5:  (0, 255, 255),     # 青色 cyan                        沙发 (sofa)  ***
+    6:  (255, 165, 0),     # 橙色 orange                      床 (bed)  ***
+    7:  (255, 255, 0),     # 黄色 yellow                      植物 (plant)
+    8:  (128, 128, 128),   # 灰色 gray                        洗手池 / 水槽 (sink)
+    9:  (128, 0, 0),       # 栗色 maroon                      马桶 (toilet)
+    10: (255, 20, 147),    # 深粉红 deep pink                 电视 / 显示器 (tv_monitor)  ***
+    11: (0, 128, 0),       # 深绿色 dark green               淋浴器 (shower)
+    12: (128, 0, 128),     # 紫色 purple                      浴缸 (bathtub)  ***
+    13: (0, 128, 128),     # 水鸭色 teal                      操作台 / 工作台 (counter)  ***
+    14: (0, 0, 128),       # 藏青色 navy                     家电 (appliances)
+    15: (210, 105, 30),    # 巧克力色 chocolate              建筑结构 (structure)
+    16: (188, 143, 143),   # 褐玫瑰色 rosy brown             其他 / 杂项 (other)
+    17: (0, 255, 0),       # 绿色 green                      空闲空间 / 可行走区域 (free-space)   $$$
+    18: (255, 215, 0),     # 金色 gold                       图片 / 挂画 (picture)
+    19: (0, 0, 0),         # 黑色 black                      橱柜 / 柜子 (cabinet)  ***
+    20: (192, 192, 192),   # 银色 silver                     抽屉柜 (chest_of_drawers)
+    21: (138, 43, 226),    # 蓝紫色 blue violet              凳子 (stool)
+    22: (255, 127, 80),    # 珊瑚色 coral                    毛巾 (towel)
+    23: (238, 130, 238),   # 紫罗兰色 violet                 壁炉 (fireplace)
+    24: (245, 245, 220),   # 米色 / 浅卡其 beige            健身器材 (gym_equipment)
+    25: (139, 69, 19),     # 马鞍棕 saddle brown            座位（综合类）(seating)
+    26: (64, 224, 208)     # 绿松石色 turquoise              衣物 (clothes)
 }
 
 # ----------------------------

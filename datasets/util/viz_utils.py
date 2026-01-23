@@ -7,7 +7,7 @@ import math
 import torch
 from PIL import Image
 from habitat_sim.utils.common import d3_40_colors_rgb
-# import datasets.util.map_utils as map_utils
+import datasets.util.map_utils as map_utils
 import datasets.util.viz_utils as viz_utils
 import cv2
 
@@ -256,54 +256,132 @@ def display_sample(rgb_obs, depth_obs, sseg_img=None, savepath=None):
     plt.close()
 
 
+# zhjd 定制
+#  step_geo_grid.shape:  torch.Size([1, 10, 27, 300, 300])
+#  step_uncertainty.shape:  torch.Size([1, 10, 27, 300, 300]
+def save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list, save_img_dir_, timestamp_length):
+# def save_uncertainty(sg, ltg, pose_coords, save_img_dir_, timestamp_length):
+    step_geo_grid = step_geo_grid.squeeze(0)  # 变为[10, 27, 300, 300]
+    step_uncertainty = step_uncertainty.squeeze(0)  # 变为[10, 27, 300, 300]
+    for sem_lbl in [1, 2, 3, 4, 5, 6, 10, 12, 13, 19]:
+        for t in range(timestamp_length):
+            # 1. 提取该类别的预测图（概率图）
+            target_pred = step_geo_grid[t, sem_lbl, :, :].unsqueeze(0)  # [1, H, W]
+            # ZHJD: 将等于 1/C 的位置置为 0. 去除屏幕边缘的黄色区域，为了美观
+            mask = (target_pred == (1.0 / 27.0))
+            target_pred[mask] = 0.0
+            target_pred = target_pred.permute(1, 2, 0).cpu().numpy() * 255.0
 
-# def save_visual_steps(test_ds, sg, sem_lbl, abs_pose, ltg, pose_coords, agent_height, save_img_dir_, t):
-#
-#     target_pred = sg.sem_grid[:,sem_lbl,:,:]
-#     target_pred = target_pred.permute(1,2,0).cpu().numpy()*255.0
-#
-#     target_uncertainty = sg.per_class_uncertainty_map[:,sem_lbl,:,:].permute(1,2,0).cpu().numpy()
-#     target_uncertainty /= np.amax(target_uncertainty)
-#     target_uncertainty = target_uncertainty*255.0
-#
-#     color_sem_grid = colorize_grid(sg.sem_grid.unsqueeze(1))
-#     im = color_sem_grid[0,0,:,:,:].permute(1,2,0).cpu().numpy()
-#
-#     pose_ = np.asarray(abs_pose).reshape(1,3)
-#     gt_grid_crops_objects = map_utils.get_gt_crops(pose_, test_ds.pcloud, test_ds.label_seq_objects, agent_height,
-#                                             test_ds.grid_dim, test_ds.crop_size, test_ds.cell_size)
-#     color_gt_crop = colorize_grid(gt_grid_crops_objects.unsqueeze(0))
-#     im_gt_crop = color_gt_crop[0,0,:,:,:].permute(1,2,0).cpu().numpy()
-#
-#     # crop viz inputs to 128 x 128
-#     area_size = 100 # area around the agent to be evaluated
-#     area_start = int( (im.shape[0] / 2) - (area_size / 2) )
-#     area_end = int( (im.shape[0] / 2) + (area_size / 2) )
-#     im = im[area_start:area_end, area_start:area_end,:]
-#     target_uncertainty = target_uncertainty[area_start:area_end, area_start:area_end,:]
-#     target_pred = target_pred[area_start:area_end, area_start:area_end,:]
-#
-#     # translate coords
-#     ltg[0,0,0] -= area_start
-#     ltg[0,0,1] -= area_start
-#     pose_coords[0,0,0] -= area_start
-#     pose_coords[0,0,1] -= area_start
-#
-#     arr = [ im,
-#             target_pred,
-#             target_uncertainty
-#             ]
-#     n=len(arr)
-#     plt.figure(figsize=(20 ,15))
-#     for i, data in enumerate(arr):
-#         ax = plt.subplot(1, 3, i+1)
-#         ax.axis('off')
-#         plt.imshow(data)
-#         if i==0:
-#             plt.scatter(ltg[0,0,0], ltg[0,0,1], color="magenta", s=50)
-#             plt.scatter(pose_coords[0,0,0], pose_coords[0,0,1], color="blue", s=50)
-#     plt.savefig(save_img_dir_+str(t)+'.png', bbox_inches='tight', pad_inches=0, dpi=200)
-#     plt.close()
+            # 2. 提取该类别的不确定性图
+            target_uncertainty = step_uncertainty[t, sem_lbl, :, :].unsqueeze(0)
+            target_uncertainty = target_uncertainty.permute(1, 2, 0).cpu().numpy()
+            target_uncertainty /= np.amax(target_uncertainty)+ 1e-6  # 避免除 0
+            target_uncertainty = target_uncertainty * 255.0
+            #  3. 获取整个语义地图的彩色图
+            # color_sem_grid = colorize_grid(sg.sem_grid.unsqueeze(1))
+            # im = color_sem_grid[0, 0, :, :, :].permute(1, 2, 0).cpu().numpy()
+            color_sem_grid = colorize_grid(step_geo_grid[t].unsqueeze(0).unsqueeze(0))  # shape: [1, 1, H, W, 3]
+            im = color_sem_grid[0, 0].permute(1, 2, 0).cpu().numpy()
+
+            #  5. 裁剪中心区域（100x100）
+            # crop viz inputs to 128 x 128
+            area_size = 100  # area around the agent to be evaluated
+            # 只关注 agent 周围的局部区域，避免图太大
+            area_start = int((im.shape[0] / 2) - (area_size / 2))
+            area_end = int((im.shape[0] / 2) + (area_size / 2))
+            # 把彩色语义图、不确定性图、预测图都裁成 100x100
+            im = im[area_start:area_end, area_start:area_end, :]
+            target_uncertainty = target_uncertainty[area_start:area_end, area_start:area_end, :]
+            target_pred = target_pred[area_start:area_end, area_start:area_end, :]
+
+            #  6. 平移坐标（匹配裁剪后坐标系）
+            # translate coords   减去 area_start 是为了把坐标对齐到裁剪后的图像中
+            # ltg[0, 0, 0] -= area_start
+            # ltg[0, 0, 1] -= area_start
+            pose_x = pose_coords_list[t, 0, 0, 0].item() - area_start
+            pose_y = pose_coords_list[t, 0, 0, 1].item() - area_start
+
+            # 7. 可视化并保存图片
+            # 把三个图（语义地图、预测图、不确定性图）用 matplotlib 拼成 3 个 subplot
+            # 其中第一张图上添加了 agent 当前的位置（蓝色）和目标点位置（洋红色）
+            arr = [im, target_pred, target_uncertainty]
+            plt.figure(figsize=(20, 15))
+            for i, data in enumerate(arr):
+                ax = plt.subplot(1, 3, i + 1)
+                ax.axis('off')
+                plt.imshow(data)
+                if i == 0:
+                    plt.scatter(pose_x, pose_y, color="blue", s=50)
+                    # plt.scatter(ltg[0, 0, 0], ltg[0, 0, 1], color="magenta", s=50)
+
+            # 8. 保存图像为 PNG
+            plt.savefig(save_img_dir_ + 'label-' + str(sem_lbl) + '_time-' + str(t) + '.png', bbox_inches='tight', pad_inches=0, dpi=200)
+            plt.close()
+
+
+# 将语义地图（semantic map）、预测结果和不确定性图可视化并保存为一张图片
+# test_ds	测试集对象，含点云等信息
+# sg	语义地图对象（semantic grid），含有 sem_grid 和 per_class_uncertainty_map
+# sem_lbl	要可视化的语义类别索引（如“桌子”、“椅子”等）
+# abs_pose	当前 agent 的世界坐标位置
+# ltg	long-term goal（目标点）坐标
+# pose_coords	当前 agent 在栅格地图中的坐标
+# agent_height	agent 身高，用于投影点云
+# save_img_dir_	保存图片的路径前缀
+# t	当前时间步编号（用于命名）
+def save_visual_steps(test_ds, sg, sem_lbl, abs_pose, ltg, pose_coords, agent_height, save_img_dir_, t):
+    # 1. 提取该类别的预测图（概率图）
+    target_pred = sg.sem_grid[:,sem_lbl,:,:]
+    target_pred = target_pred.permute(1,2,0).cpu().numpy()*255.0
+    # 2. 提取该类别的不确定性图
+    target_uncertainty = sg.per_class_uncertainty_map[:,sem_lbl,:,:].permute(1,2,0).cpu().numpy()
+    target_uncertainty /= np.amax(target_uncertainty)
+    target_uncertainty = target_uncertainty*255.0
+    #  3. 获取整个语义地图的彩色图
+    color_sem_grid = colorize_grid(sg.sem_grid.unsqueeze(1))
+    im = color_sem_grid[0,0,:,:,:].permute(1,2,0).cpu().numpy()
+    #  4. 获取地面真实语义 crop 图（用于评估）
+    pose_ = np.asarray(abs_pose).reshape(1,3)
+    gt_grid_crops_objects = map_utils.get_gt_crops(pose_, test_ds.pcloud, test_ds.label_seq_objects, agent_height,
+                                            test_ds.grid_dim, test_ds.crop_size, test_ds.cell_size)
+    color_gt_crop = colorize_grid(gt_grid_crops_objects.unsqueeze(0))
+    im_gt_crop = color_gt_crop[0,0,:,:,:].permute(1,2,0).cpu().numpy()
+
+    #  5. 裁剪中心区域（100x100）
+    # crop viz inputs to 128 x 128
+    area_size = 100 # area around the agent to be evaluated
+    area_start = int( (im.shape[0] / 2) - (area_size / 2) )
+    area_end = int( (im.shape[0] / 2) + (area_size / 2) )
+    im = im[area_start:area_end, area_start:area_end,:]
+    target_uncertainty = target_uncertainty[area_start:area_end, area_start:area_end,:]
+    target_pred = target_pred[area_start:area_end, area_start:area_end,:]
+
+    # translate coords
+    ltg[0,0,0] -= area_start
+    ltg[0,0,1] -= area_start
+    pose_coords[0,0,0] -= area_start
+    pose_coords[0,0,1] -= area_start
+
+    # 7. 可视化并保存图片
+    # 把三个图（语义地图、预测图、不确定性图）用 matplotlib 拼成 3 个 subplot
+    # 其中第一张图上添加了 agent 当前的位置（蓝色）和目标点位置（洋红色）
+    arr = [ im,
+            target_pred,
+            target_uncertainty
+            ]
+    n=len(arr)
+    plt.figure(figsize=(20 ,15))
+    for i, data in enumerate(arr):
+        ax = plt.subplot(1, 3, i+1)
+        ax.axis('off')
+        plt.imshow(data)
+        if i==0:
+            plt.scatter(ltg[0,0,0], ltg[0,0,1], color="magenta", s=50)
+            plt.scatter(pose_coords[0,0,0], pose_coords[0,0,1], color="blue", s=50)
+
+    # 8. 保存图像为 PNG
+    plt.savefig(save_img_dir_+str(t)+'.png', bbox_inches='tight', pad_inches=0, dpi=200)
+    plt.close()
 
 
 # def save_map_pred_steps(spatial_in, spatial_pred, objects_pred, ego_img_segm, save_img_dir_, t):
@@ -589,6 +667,69 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
         plt.close()
         print(f"✅ 已保存: {save_file}")
 
+
+
+def save_all_infos_and_mapprediction_Global(batch, local_pred_maps_objects, global_maps_objects, savepath, name):
+    # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial',
+    # 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
+    images = batch['images']
+    ssegs = batch['gt_segm']  # 物体分割真值
+    depth_imgs = batch['depth_imgs']
+    pred_ego_crops_sseg = batch['pred_ego_crops_sseg']  # net3的输出
+
+    step_ego_grid_27 = batch['step_ego_grid_27']
+    ##### RSMP的输出 pred_maps_objects
+    gt_grid_crops_objects = batch['gt_grid_crops_objects']
+
+    ego_grid_crops_spatial = batch['ego_grid_crops_spatial']  # 当前帧几何地图
+    step_ego_grid_crops_spatial = batch['step_ego_grid_crops_spatial']  # 多帧融合几何地图
+    gt_grid_crops_spatial = batch['gt_grid_crops_spatial']  # 语义地图真值
+
+    B, T, _, cH, cW = step_ego_grid_27.shape
+    for t in range(T):
+        print(f"🕒 时间步 {t}")
+        images_single = images[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        ssegs_single = ssegs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        depth_imgs_single = depth_imgs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+
+        step_ego_grid_27_single = color_and_extract(step_ego_grid_27[0, t, :, :, :], 27)
+        pred_maps_objects_single = color_and_extract(local_pred_maps_objects[0, t, :, :, :], 27)
+        gt_grid_crops_objects_single = color_and_extract(gt_grid_crops_objects[0, t, :, :, :], 27)
+
+        global_maps_objects_single = color_and_extract(global_maps_objects[0, t, :, :, :], 27)
+        # ego_grid_crops_spatial_single = color_and_extract(ego_grid_crops_spatial[0, t, :, :, :], 3)
+        step_ego_grid_crops_spatial_single = color_and_extract(step_ego_grid_crops_spatial[0, t, :, :, :], 3)
+        gt_grid_crops_spatial_single = color_and_extract(gt_grid_crops_spatial[0, t, :, :, :], 3)
+
+
+        # === 九宫格保存本地===
+        fig, axs = plt.subplots(3, 3, figsize=(20, 20))
+        axs = axs.flatten()
+
+        imgs = [
+            (images_single, "RGB Image", None),
+            (ssegs_single, "GT Segmentation", 'tab20'),
+            (depth_imgs_single, "Depth", 'viridis'),
+            (step_ego_grid_27_single, "RGB Project", None),
+            (pred_maps_objects_single, "Refined Semantic Map", None),
+            (gt_grid_crops_objects_single, "GT Semantic Map", None),
+            (global_maps_objects_single, "Global Semantic Map", None),
+            (step_ego_grid_crops_spatial_single, "Refined Occupied Map", None),
+            (gt_grid_crops_spatial_single, "GT Occupied Map", None)
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(savepath, f"{name}_t{t}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+        print(f"✅ 已保存: {save_file}")
 
 
 # zhjd

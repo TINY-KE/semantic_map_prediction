@@ -137,7 +137,11 @@ class MP_TrainerAM(BaseTrainer):
         for tstep, batch in enumerate(tqdm(test_data_loader,
                                            desc='Testing',
                                            total=self.options.test_iters)):
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+            # batch = {k: v.to(self.device) for k, v in batch.items()}
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
             with torch.no_grad():
                 pred_output = self.models_dict['predictor_model'](batch)
                 loss_output = self.models_dict['predictor_model'].module.loss_cel(batch, pred_output)

@@ -5,6 +5,7 @@
 from train_options import TrainOptions
 from mp_trainer import MP_TrainerAM
 from tester import SemMapTester, SemMapSLAMer
+from Searcher import SearchTester, SearchSLAMer
 import multiprocessing as mp
 
 
@@ -19,7 +20,8 @@ if __name__ == '__main__':
 
     else:
         if options.sem_map_test:
-            tester = SemMapTester(options)
+            # tester = SemMapTester(options)
+            tester = SearchTester(options)
             print("     [zhjd-debug] Testing semantic map prediction...")
             tester.test_semantic_map()
         else:

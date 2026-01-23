@@ -257,7 +257,7 @@ object_id_to_name = {
 if __name__ == "__main__":
     root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
     ep_path = root_path + '/' + 'ep_1_1_2azQ1b91cZZ.npz'
-    ep_path = "/home/robotlab/work/semantic-segmentation-pytorch/save_results/virtual_robot_outputs.npz"
+    # ep_path = "/home/robotlab/work/semantic-segmentation-pytorch/save_results/virtual_robot_outputs.npz"
 
     # ep_path = '/home/robotlab/dataset/MP3D_dataset/v1/tasks/mp3d_habitat/NPZ/train/HxpKQynjfin/ep_1_1_HxpKQynjfin.npz'
     if not os.path.exists(ep_path):

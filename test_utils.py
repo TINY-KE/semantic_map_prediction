@@ -52,11 +52,18 @@ def get_2d_pose(position, rotation):
     pose = x, y, o
     return pose, height
 
-
-
-def get_coord_pose(sg, rel_pose, init_pose, grid_dim, cell_size, device):
+# zhjd 改编
+# 根据相对位姿 rel_pose 和初始位姿 init_pose，通过空间变换（spatial transformer）计算出 当前位姿在语义地图网格中的坐标。
+# sg	包含 spatialTransformer 方法的类（通常是 Semantic Grid 模型）
+# rel_pose	相对起始位置的 pose（T × 3）
+# init_pose	初始位姿（起点 pose），shape 应为 [T, 3]
+# grid_dim	地图的宽/高（正方形）
+# cell_size	地图中每个 cell 的真实世界尺寸（如 0.1m）
+# device	执行模型的设备（如 'cuda'）
+def get_coord_pose_for_robot_center(sg, rel_pose, init_pose, grid_dim, cell_size, device):
     # Create a grid where the starting location is always at the center looking upwards (like the ground-projected grids)
     # Then use the spatial transformer to move that location at the right place
+    # 判断变量 init_pose 是否是一个 list（列表） 或者 tuple（元组） 类型。如果是列表或元组，就将它转换为张量，并加一个 batch 维度。
     if isinstance(init_pose, list) or isinstance(init_pose, tuple):
         init_pose = torch.tensor(init_pose).unsqueeze(0)
     else:
@@ -70,19 +77,31 @@ def get_coord_pose(sg, rel_pose, init_pose, grid_dim, cell_size, device):
                                             grid_dim=(grid_dim, grid_dim),
                                             cell_size=cell_size)
 
-    pose_grid = torch.zeros((1, 1, grid_dim, grid_dim), dtype=torch.float32).to(device)
-    pose_grid[0,0,zero_coords[0,0], zero_coords[0,1]] = 1
+    pose_grid = torch.zeros((rel_pose.shape[0], 1, grid_dim, grid_dim), dtype=torch.float32).to(device)
 
+    for i in range(rel_pose.shape[0]):
+        pose_grid[i, 0, zero_coords[0, 0], zero_coords[0, 1]] = 1
+
+    # 位移后的ego地图  grid -- sequence len * number of classes * grid_dim * grid_dim
     pose_grid_transf = sg.spatialTransformer(grid=pose_grid, pose=rel_pose, abs_pose=init_pose)
-    
-    pose_grid_transf = pose_grid_transf.squeeze(0).squeeze(0)
-    inds = utils.unravel_index(pose_grid_transf.argmax(), pose_grid_transf.shape)
+    # print("pose_grid_transf.shape: ", pose_grid_transf.shape)     得到 torch.Size([10, 1, 300, 300])
 
-    pose_coord = torch.zeros((1, 1, 2), dtype=torch.int64).to(device)
-    pose_coord[0,0,0] = inds[1] # inds is y,x
-    pose_coord[0,0,1] = inds[0]
-    return pose_coord
+    pose_coords_list = []
+    for i in range(pose_grid_transf.shape[0]):
+        pose_grid_transf_single = pose_grid_transf[i].squeeze(0)
+        # print("pose_grid_transf_single.shape: ", pose_grid_transf_single.shape)     # 得到torch.Size([300, 300]
 
+        # 找到 pose_grid_transf_single 张量中最大值的位置坐标（索引），并将其从扁平索引转换为多维索引（坐标）。
+        inds = utils.unravel_index(pose_grid_transf_single.argmax(), pose_grid_transf_single.shape)
+        # print("inds: ", inds)     # 得到  tensor([  0,   0, 149, 149])
+
+        pose_coord = torch.zeros((1, 1, 2), dtype=torch.int64).to(device)
+        pose_coord[0,0,0] = inds[1] # inds is y,x
+        pose_coord[0,0,1] = inds[0]
+        # print("pose_coord: ", pose_coord)     # 得到
+        pose_coords_list.append(pose_coord)
+
+    return torch.stack(pose_coords_list)   #  torch.Size([10, 1, 2])
 
 
 def get_closest_target_location(sg, pose_coords, sem_lbl, cell_size, sem_thresh):

@@ -45,6 +45,12 @@ class HabitatDataOfflineMPv2(Dataset):
         self.object_labels = options.n_object_classes  # 物体类别数
         self.episodes_dir = options.stored_episodes_dir  # 存储 episodes 的目录
 
+        # 地图参数  zhjd 手动设定
+        self.spatial_labels = 3
+        self.grid_dim = (300, 300)
+        self.cell_size = 0.1
+        self.crop_size = (64, 64)
+
         # if self.img_segm:
             # self.episodes_imgSegm_dir = options.stored_imgSegm_episodes_dir
             # self.episodes_dir = options.stored_episodes_dir
@@ -95,8 +101,10 @@ class HabitatDataOfflineMPv2(Dataset):
 
         item = {}
         # item['name'] = sample_name
-        item['pose'] = torch.from_numpy(np.asarray(rel_pose)).float()
+        item['rel_pose'] = torch.from_numpy(np.asarray(rel_pose)).float()
         item['abs_pose'] = torch.from_numpy(abs_pose).float()
+        # print('     [zhjd-debug-geitem] abs_pose: ', abs_pose)
+        # print('     [zhjd-debug-geitem] abs_pose.shape: ', abs_pose.shape)
         item['ego_grid_crops_spatial'] = ego_grid_crops_spatial  # already torch.float32
         item['step_ego_grid_crops_spatial'] = step_ego_grid_crops_spatial
         item['gt_grid_crops_spatial'] = gt_grid_crops_spatial  # Long tensor, int64

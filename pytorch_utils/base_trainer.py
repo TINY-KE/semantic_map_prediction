@@ -126,7 +126,11 @@ class BaseTrainer(object):
                                               initial=train_data_loader.checkpoint_batch_idx),
                                          train_data_loader.checkpoint_batch_idx):
                 if time.time() < self.endtime and self.exit_code is None:
-                    batch = {k: v.to(self.device) for k,v in batch.items()}
+                    # batch = {k: v.to(self.device) for k,v in batch.items()}
+                    batch = {
+                        k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()
+                    }
                     torch.cuda.empty_cache()
                     out = self.train_step(batch, self.step_count)
 

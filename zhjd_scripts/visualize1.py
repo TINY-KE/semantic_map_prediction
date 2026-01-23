@@ -38,6 +38,7 @@ class ObjNavEpisodeDataset(Dataset):
         ep_file = self.episodes_file_list[idx]
         ep = np.load(ep_file)
 
+        print("ep['abs_pose']维度：", ep['abs_pose'].shape)
         abs_pose = ep['abs_pose'][-4:]
         ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-4:])
         step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-4:])
@@ -219,8 +220,12 @@ def visualize_all_fields(item, timestep=0):
 # 主函数入口
 # ----------------------------
 if __name__ == "__main__":
-    root_path = "/home/robotlab/dataset/dateset/L2M_datasets/data_v6/test/2azQ1b91cZZ"
+    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
+    ep_path = root_path + '/' + 'ep_92_148_2azQ1b91cZZ.npz'
+    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
     ep_path = root_path + '/' + 'ep_1_1_2azQ1b91cZZ.npz'
+    # root_path = "/home/robotlab/dataset/MP3D_dataset/v1/tasks/mp3d_habitat_scenes_dir/NPZ/train/HxpKQynjfin"
+    # ep_path = root_path + '/' + 'ep_1_1_HxpKQynjfin.npz'
 
     if not os.path.exists(ep_path):
         print(f"❌ 文件未找到: {ep_path}")
@@ -228,11 +233,16 @@ if __name__ == "__main__":
 
     dataset = ObjNavEpisodeDataset([ep_path])
     item = dataset[0]
+    print(item.keys())  # 看看 item 里有哪些字段
+    print("RGB 维度：", item['images'].shape)
+    print("深度图维度：", item['depth_imgs'].shape)
+    print("语义分割维度：", item['gt_segm'].shape)
+    print("相机位姿维度：", item['abs_pose'].shape)
 
     # for t in range(4):
     #     print(f"\n=== 可视化时间步 {t} ===")
     #     visualize_item(item, timestep=t)
 
-    for t in range(4):
+    for t in range(10):
         print(f"🕒 时间步 {t}")
         visualize_all_fields(item, timestep=t)

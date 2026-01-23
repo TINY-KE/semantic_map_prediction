@@ -39,6 +39,7 @@ class SemanticGrid(object):
         # pose -- sequence len x 3
         # abs_pose -- same as pose
 
+        #  torch.Size([1, 1, 300, 300]
         geo_grid_out = torch.zeros((grid.shape[0], grid.shape[1], self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32).to(grid.device)
 
         init_pose = abs_pose[0,:]  # init absolute pose of each sequence
@@ -114,13 +115,18 @@ class SemanticGrid(object):
         # geo_grid contains the single view observations of the sequence
         step_geo_grid = torch.zeros((geo_grid.shape[0], geo_grid.shape[1], self.object_labels, 
                                                 self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32).to(geo_grid.device)
+        # 2. 遍历时间序列中的每一帧
         for i in range(geo_grid.shape[1]): # sequence length
             new_obsv_grid = geo_grid[:,i,:,:,:]
+            # 3. 在self.sem_grid的基础上，进行贝叶斯融合
             mul_probs_grid = new_obsv_grid * self.sem_grid
+            # 4. 对类别维求和，得到归一化因子（每个 pixel 的总概率）
             normalization_grid = torch.sum(mul_probs_grid, dim=1, keepdim=True)
+            # 5. 对每个像素，在所有类别之间做归一化，得到新的概率分布
             self.sem_grid = mul_probs_grid / normalization_grid.repeat(1, self.object_labels, 1, 1)
+            # 5. 6. 保存每一步的中间结果
             step_geo_grid[:,i,:,:,:] = self.sem_grid.clone()
-        return step_geo_grid
+        return step_geo_grid  # 形状为 torch.Size([1, 10, 27, 400, 400])
 
    
     def update_uncertainty_map_avg(self, geo_grid):
@@ -140,6 +146,8 @@ class SemanticGrid(object):
         # Input geo_grid -- B x T x C x grid_dim x grid_dim
         # Update the per class uncertainty estimation at each location
         # Update only the locations where the geo_grid has uncertainty values
+        step_zhjd_uncertain = torch.zeros((geo_grid.shape[0], geo_grid.shape[1], self.object_labels,
+                                     self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32).to(geo_grid.device)
         for i in range(geo_grid.shape[1]):
             new_uncertainty_grid = geo_grid[:,i,:,:,:].clone()
             inds = torch.nonzero(new_uncertainty_grid > 1e-7, as_tuple=True)
@@ -147,7 +155,8 @@ class SemanticGrid(object):
             current_map[inds[0],inds[1],inds[2],inds[3]] += new_uncertainty_grid[inds[0],inds[1],inds[2],inds[3]]
             current_map[inds[0],inds[1],inds[2],inds[3]] /= 2
             self.per_class_uncertainty_map = current_map
-
+            step_zhjd_uncertain[:, i, :, :, :] = self.per_class_uncertainty_map.clone()
+        return step_zhjd_uncertain
 
     def update_proj_grid_bayes(self, geo_grid):
         # Input geo_grid -- B x T (or 1) x num_of_classes x grid_dim x grid_dim
@@ -172,18 +181,26 @@ class SemanticGrid(object):
         geo_uncertainty_maps = self.spatialTransformer(grid=ego_uncertainty_map, pose=pose, abs_pose=abs_pose)
         self.update_uncertainty_map_avg(geo_grid=geo_uncertainty_maps.unsqueeze(0)) # updates sg.uncertainty_map
 
-
+    # FIXME: per_class_uncertainty_crop.squeeze(0)这意味着强制要求 B == 1，因为 .squeeze(0) 会把第 0 维（batch 维）去掉——但只有当这一维是 1 时才不会报错。
+    # 将当前帧（或多帧）的每类不确定性地图（uncertainty map）注册到全局地图中，即根据机器人当前的位姿 pose 和全局位姿 abs_pose，把局部的不确定性图转换到全局坐标系下，并更新全局的不确定性图。
     def register_per_class_uncertainty(self, per_class_uncertainty_crop, pose, abs_pose):
         B, T, C, cH, cW = per_class_uncertainty_crop.shape
+        # 初始值设为 0
         ego_per_class_uncertainty_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
         ego_per_class_uncertainty_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = per_class_uncertainty_crop.squeeze(0)
         geo_per_class_uncertainty_maps = self.spatialTransformer(grid=ego_per_class_uncertainty_map, pose=pose, abs_pose=abs_pose)
-        self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
+        return self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
 
-
+    # 每个时间戳下的更新，是在上一时间戳基础上进行的。详情参考update_sem_grid_bayes函数
     def register_sem_pred(self, prediction_crop, pose, abs_pose):
         B, T, C, cH, cW = prediction_crop.shape
+        # L2M原版：初始值设为 1 / C
         ego_pred_map = torch.ones((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device) * (1/C)
+        # # ZHJD版：初始值设为0
+        # ego_pred_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
         ego_pred_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(0)
+        # 进行位姿变换（局部 → 全局）
         geo_pred_map = self.spatialTransformer(grid=ego_pred_map, pose=pose, abs_pose=abs_pose)
-        self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0)) # updates sg.sem_grid
+
+        return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0)) # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+
