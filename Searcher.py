@@ -126,13 +126,13 @@ class SearchTester(object):
                     ensemble_object_maps.append(pred_output['pred_maps_objects'].clone())
 
                 # 5. 集成模型平均预测
-                ensemble_object_maps = torch.stack(ensemble_object_maps)  # N x B x T x C x cH x cW
-                print("   [zhjd-debug-search] ensemble_object_maps.shape: ", ensemble_object_maps.shape)  # torch.Size([1, 1, 10, 27, 64, 64])
+                ensemble_object_maps = torch.stack(ensemble_object_maps)  # N x B x T x C x cH x cW   torch.Size([4, 1, 10, 27, 64, 64])
+                # print("   [zhjd-debug-search] ensemble_object_maps.shape: ", ensemble_object_maps.shape)  # torch.Size([1, 1, 10, 27, 64, 64])
 
                 # TODO: 各模型预测的平均语义图
                 # Getting the mean predictions from the ensemble
                 pred_maps_objects = torch.mean(ensemble_object_maps, dim=0)  # B x T x C x cH x cW
-                print("   [zhjd-debug-search] pred_maps_objects.shape: ", pred_maps_objects.shape)
+                # print("   [zhjd-debug-search] pred_maps_objects.shape: ", pred_maps_objects.shape)   torch.Size([1, 10, 27, 64, 64])
 
                 # argmax，只用于可视化
                 # Decide label for each location based on predition probs
@@ -200,8 +200,8 @@ class SearchTester(object):
                 # 6.3 全局地图
                 # 添加到全局地图 add semantic prediction to semantic map
                 step_geo_grid = sg.register_sem_pred(prediction_crop=pred_maps_objects, pose=_rel_pose, abs_pose=_abs_poses)  # 形状为 torch.Size([1, 10, 27, 400, 400])
-                print("   [zhjd-debug-search] step_geo_grid.shape: ", step_geo_grid.shape)
-                print("   [zhjd-debug-search] step_uncertainty.shape: ", step_uncertainty.shape)
+                # print("   [zhjd-debug-search] step_geo_grid.shape: ", step_geo_grid.shape)    torch.Size([1, 10, 27, 300, 300])
+                # print("   [zhjd-debug-search] step_uncertainty.shape: ", step_uncertainty.shape)   torch.Size([1, 10, 27, 300, 300])
 
                 # ltg_dist = torch.linalg.norm(ltg.clone().float()-pose_coords.float())*self.options.cell_size # distance to current long-term goal
 
@@ -211,13 +211,13 @@ class SearchTester(object):
                 if self.options.save_nav_images:
                     # save_img_dir_ = self.options.save_img_dir + '/ep_' + str(tstep)  + '/'
                     save_img_dir_ = f"{self.options.save_img_dir}/{scene_id}/{epsoid_name}/"
-                    save_img_dir_ = f"{self.options.save_img_dir}/{scene_id}/{epsoid_name}/"
                     print("     [zhjd-debug-search] save_img_dir_: ", save_img_dir_)
                     if not os.path.exists(save_img_dir_):
                         os.makedirs(save_img_dir_)
-                    # viz_utils.save_all_infos_and_mapprediction_Global(batch, pred_maps_objects, step_geo_grid, savepath=save_img_dir_, name='path')
-                    # viz_utils.save_uncertainty(sg, ltg.clone().cpu().numpy(), pose_coords.clone().cpu().numpy(), save_img_dir_)
+                    viz_utils.save_all_infos_and_mapprediction_Global(batch, pred_maps_objects, step_geo_grid, savepath=save_img_dir_, name='path')
                     viz_utils.save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list.clone().cpu().numpy(), save_img_dir_, timestamp_length=10)
+                    viz_utils.save_ensembles(ensemble_object_maps, pred_maps_objects, save_img_dir_=save_img_dir_)
+
 
                 # 7. 混淆矩阵计算
                 current_confusion_matrix_objects = confusion_matrix(y_true=gt_crops_objects.flatten(), y_pred=pred_labels_objects.flatten(), labels=object_labels)

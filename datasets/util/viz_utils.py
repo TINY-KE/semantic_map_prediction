@@ -95,34 +95,66 @@ label_conversion_40_27 = {-1:0, 0:0, 1:15, 2:17, 3:1, 4:2, 5:3, 6:18, 7:19, 8:4,
 #     25:(139,69,19), # saddle brown
 #     26:(64,224,208) # turquoise
 # }
+
+
+name_mapping_27 = {
+    0:  "空类别",           # 白色 white                       空类别 / 无类别 (void)
+    1:  "椅子",             # 橄榄色 olive                     椅子 (chair)  ***
+    2:  "门",               # 蓝色 blue                        门 (door)  ***%%
+    3:  "桌子",             # 红色 red                         桌子 (table)  ***
+    4:  "靠垫cushion",             # 洋红色 magenta                   靠垫 / 坐垫 (cushion)  ***
+    5:  "沙发",             # 青色 cyan                        沙发 (sofa)  ***
+    6:  "床",               # 橙色 orange                      床 (bed)  ***
+    7:  "植物",             # 黄色 yellow                      植物 (plant)
+    8:  "洗手池",           # 灰色 gray                        洗手池 / 水槽 (sink)
+    9:  "马桶",             # 栗色 maroon                      马桶 (toilet)
+    10: "电视",             # 深粉红 deep pink                 电视 / 显示器 (tv_monitor)  ***%%
+    11: "淋浴器",           # 深绿色 dark green               淋浴器 (shower)
+    12: "浴缸",             # 紫色 purple                      浴缸 (bathtub)  ***%%
+    13: "工作台counter",           # 水鸭色 teal                      操作台 / 工作台 (counter)  ***
+    14: "家电",             # 藏青色 navy                     家电 (appliances)
+    15: "墙",         # 巧克力色 chocolate              建筑结构 (structure)
+    16: "其他",             # 褐玫瑰色 rosy brown             其他 / 杂项 (other)
+    17: "可行走区域",       # 绿色 green                      空闲空间 / 可行走区域 (free-space)
+    18: "画",             # 金色 gold                       图片 / 挂画 (picture)
+    19: "橱柜cabinet",             # 黑色 black                      橱柜 / 柜子 (cabinet)  ***
+    20: "抽屉",           # 银色 silver                     抽屉柜 (chest_of_drawers)
+    21: "凳子",             # 蓝紫色 blue violet              凳子 (stool)
+    22: "毛巾",             # 珊瑚色 coral                    毛巾 (towel)
+    23: "壁炉",             # 紫罗兰色 violet                 壁炉 (fireplace)
+    24: "健身器材",         # 米色 / 浅卡其 beige            健身器材 (gym_equipment)
+    25: "座位",             # 马鞍棕 saddle brown            座位（综合类）(seating)
+    26: "衣服",             # 绿松石色 turquoise              衣物 (clothes)
+}
+
 color_mapping_27 = {
-    0:(255,255,255), # white
-    1:(128,128,0), # olive (dark yellow)
-    2:(0,0,255), # blue
-    3:(255,0,0), # red
-    4:(255,0,255), # magenta
-    5:(0,255,255), # cyan
-    6:(255,165,0), # orange
-    7:(255,255,0), # yellow
-    8:(128,128,128), # gray
-    9:(128,0,0), # maroon
-    10:(255,20,147), # pink
-    11:(0,128,0), # dark green
-    12:(128,0,128), # purple
-    13:(0,128,128), # teal
-    14:(0,0,128), # navy (dark blue)
-    15:(210,105,30), # chocolate
-    16:(188,143,143), # rosy brown
-    17:(100,255,100), # green
-    18:(255,215,0), # gold
-    19:(0,0,0), # black
-    20:(192,192,192), # silver
-    21:(138,43,226), # blue violet
-    22:(255,127,80), # coral
-    23:(238,130,238), # violet
-    24:(245,245,220), # beige
-    25:(139,69,19), # saddle brown
-    26:(64,224,208) # turquoise
+    0:  (255, 255, 255),   # 白色 white                       空类别 / 无类别 (void)
+    1:  (128, 128, 0),     # 橄榄色 olive                     椅子 (chair)  ***
+    2:  (0, 0, 255),       # 蓝色 blue                        门 (door)  ***
+    3:  (255, 0, 0),       # 红色 red                         桌子 (table)  ***
+    4:  (255, 0, 255),     # 洋红色 magenta                   靠垫 / 坐垫 (cushion)  ***
+    5:  (0, 255, 255),     # 青色 cyan                        沙发 (sofa)  ***
+    6:  (255, 165, 0),     # 橙色 orange                      床 (bed)  ***
+    7:  (255, 255, 0),     # 黄色 yellow                      植物 (plant)
+    8:  (128, 128, 128),   # 灰色 gray                        洗手池 / 水槽 (sink)
+    9:  (128, 0, 0),       # 栗色 maroon                      马桶 (toilet)
+    10: (255, 20, 147),    # 深粉红 deep pink                 电视 / 显示器 (tv_monitor)  ***
+    11: (0, 128, 0),       # 深绿色 dark green               淋浴器 (shower)
+    12: (128, 0, 128),     # 紫色 purple                      浴缸 (bathtub)  ***
+    13: (0, 128, 128),     # 水鸭色 teal                      操作台 / 工作台 (counter)  ***
+    14: (0, 0, 128),       # 藏青色 navy                     家电 (appliances)
+    15: (210, 105, 30),    # 巧克力色 chocolate              建筑结构 (structure)
+    16: (188, 143, 143),   # 褐玫瑰色 rosy brown             其他 / 杂项 (other)
+    17: (0, 255, 0),       # 绿色 green                      空闲空间 / 可行走区域 (free-space)   $$$
+    18: (255, 215, 0),     # 金色 gold                       图片 / 挂画 (picture)
+    19: (0, 0, 0),         # 黑色 black                      橱柜 / 柜子 (cabinet)  ***
+    20: (192, 192, 192),   # 银色 silver                     抽屉柜 (chest_of_drawers)
+    21: (138, 43, 226),    # 蓝紫色 blue violet              凳子 (stool)
+    22: (255, 127, 80),    # 珊瑚色 coral                    毛巾 (towel)
+    23: (238, 130, 238),   # 紫罗兰色 violet                 壁炉 (fireplace)
+    24: (245, 245, 220),   # 米色 / 浅卡其 beige            健身器材 (gym_equipment)
+    25: (139, 69, 19),     # 马鞍棕 saddle brown            座位（综合类）(seating)
+    26: (64, 224, 208)     # 绿松石色 turquoise              衣物 (clothes)
 }
 
 
@@ -257,13 +289,53 @@ def display_sample(rgb_obs, depth_obs, sseg_img=None, savepath=None):
 
 
 # zhjd 定制
+#  ensemble_object_maps.shape:  torch.Size([3, 1, 10, 27, 64, 64])  ensemble_num, B, T, C, cH, cW
+#  pred_maps_objects.shape:  torch.Size([1, 10, 27, 64, 64]  B, T, _, cH, cW
+def save_ensembles(ensemble_object_maps, pred_maps_objects, save_img_dir_):
+    B, T, _, cH, cW = pred_maps_objects.shape
+    for t in range(T):
+        ensemble1 = color_and_extract(ensemble_object_maps[0, 0, t, :, :, :], 27)
+        ensemble2 = color_and_extract(ensemble_object_maps[1, 0, t, :, :, :], 27)
+        ensemble3 = color_and_extract(ensemble_object_maps[2, 0, t, :, :, :], 27)
+        ensemble4 = color_and_extract(ensemble_object_maps[3, 0, t, :, :, :], 27)
+        ## FIXME: 先用平均图替代
+        # pred_maps_objects_single = color_and_extract(pred_maps_objects[0, t, :, :, :], 27)
+        # ensemble4 = pred_maps_objects_single
+
+        # === 四宫格保存本地===
+        fig, axs = plt.subplots(2, 2, figsize=(20, 20))
+        axs = axs.flatten()
+
+        imgs = [
+            (ensemble1, "ensemble1", None),
+            (ensemble2, "ensemble2", None),
+            (ensemble3, "ensemble3", None),
+            (ensemble4, "ensemble4", None)
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(save_img_dir_, f"ensemble_t{t}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+    print(f"✅ 已保存集成模型的结果: {save_img_dir_}")
+
+
+# zhjd 定制
 #  step_geo_grid.shape:  torch.Size([1, 10, 27, 300, 300])
 #  step_uncertainty.shape:  torch.Size([1, 10, 27, 300, 300]
 def save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list, save_img_dir_, timestamp_length):
 # def save_uncertainty(sg, ltg, pose_coords, save_img_dir_, timestamp_length):
     step_geo_grid = step_geo_grid.squeeze(0)  # 变为[10, 27, 300, 300]
     step_uncertainty = step_uncertainty.squeeze(0)  # 变为[10, 27, 300, 300]
-    for sem_lbl in [1, 2, 3, 4, 5, 6, 10, 12, 13, 19]:
+    for sem_lbl in [1, 3, 4, 5, 6, 13, 19]:
+        class_name = name_mapping_27.get(sem_lbl, "未知类别")
         for t in range(timestamp_length):
             # 1. 提取该类别的预测图（概率图）
             target_pred = step_geo_grid[t, sem_lbl, :, :].unsqueeze(0)  # [1, H, W]
@@ -315,8 +387,11 @@ def save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list, save_img
                     # plt.scatter(ltg[0, 0, 0], ltg[0, 0, 1], color="magenta", s=50)
 
             # 8. 保存图像为 PNG
-            plt.savefig(save_img_dir_ + 'label-' + str(sem_lbl) + '_time-' + str(t) + '.png', bbox_inches='tight', pad_inches=0, dpi=200)
+            filename = f"{class_name}_time-{t}.png"
+            filepath = save_img_dir_ + filename
+            plt.savefig(filepath, bbox_inches='tight', pad_inches=0, dpi=200)
             plt.close()
+    print(f"✅ 已保存方差的结果: {save_img_dir_}")
 
 
 # 将语义地图（semantic map）、预测结果和不确定性图可视化并保存为一张图片
@@ -532,7 +607,7 @@ def save_all_infos_and_mapprediction_origin(batch, pred_maps_objects, savepath, 
 
     B, T, _, cH, cW = step_ego_grid_27.shape
     for t in range(T):
-        print(f"🕒 时间步 {t}")
+        # print(f"🕒 时间步 {t}")
         images_single = images[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
         ssegs_single = ssegs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
         depth_imgs_single = depth_imgs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
@@ -623,7 +698,7 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
 
     B, T, _, cH, cW = step_ego_grid_27.shape
     for t in range(T):
-        print(f"🕒 时间步 {t}")
+        # print(f"🕒 时间步 {t}")
         # RGB图
         images_single = images[0, t, :, :, :].detach().cpu().numpy()
 
@@ -687,7 +762,7 @@ def save_all_infos_and_mapprediction_Global(batch, local_pred_maps_objects, glob
 
     B, T, _, cH, cW = step_ego_grid_27.shape
     for t in range(T):
-        print(f"🕒 时间步 {t}")
+        # print(f"🕒 时间步 {t}")
         images_single = images[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
         ssegs_single = ssegs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
         depth_imgs_single = depth_imgs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
@@ -729,7 +804,7 @@ def save_all_infos_and_mapprediction_Global(batch, local_pred_maps_objects, glob
         save_file = os.path.join(savepath, f"{name}_t{t}.png")
         plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
         plt.close()
-        print(f"✅ 已保存: {save_file}")
+    print(f"✅ 已保存输入信息和EGO语义地图: {savepath}")
 
 
 # zhjd
