@@ -38,7 +38,7 @@ cd semantic_map_prediction;
 ### 下载数据集
 
 
-下载数据集 [here](https://www.dropbox.com/scl/fi/4dpko4s8fhm1bj3lbx9ng/datasets.zip?rlkey=nuvpibd5cus5cioiqtk3v1fz2&dl=0),
+下载数据集 [here](https://www.dropbox.com/scl/fi/4dpko4s8fhm1bj3lbx9ng/datasets.zip?rlkey=nuvpibd5cus5cioiqtk3v1fz2&dl=0)，并按以下路径放置，注意其中的your-datasets-path为绝对路径：
 
 ```
 your-datasets-path/
@@ -66,7 +66,7 @@ your-datasets-path/
 从零开始训练:
 
 ```
-python main.py --name train-x --batch_size 1 --num_workers 1 --is_train --log_dir you-log-path --stored_episodes_dir you-datasets-path/mp3d_objnav_episodes_tmp/ --num_epochs 50
+python main.py --name train-x --batch_size 1 --num_workers 1 --is_train --log_dir $ROOT_PATH/path-log --stored_episodes_dir you-datasets-path/mp3d_objnav_episodes_tmp/ --num_epochs 50
 ```
 
 
