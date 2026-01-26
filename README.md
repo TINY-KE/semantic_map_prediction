@@ -89,6 +89,14 @@ $ROOT_PATH/
 python main.py --name test --ensemble_dir model-path/model-name/ --log_dir your-log-dir --sem_map_test --stored_episodes_dir you-datasets-path/mp3d_objnav_episodes_tmp/ 
 ```
 
+其他可用参数  
+
+```
+    --save_nav_images  # 保存图片
+    --ensemble_size 1 # 集成模型只导入1个地图预测模型
+    --ensemble_size 4 # 集成模型只导入4个地图预测模型
+```
+
 #### 在SLAM数据集上运行:
 
 待整理
