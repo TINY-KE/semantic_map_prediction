@@ -130,6 +130,7 @@ class AE(nn.Module):
         # no object
         # A = torch.matmul(y.permute(0, 2, 1), y)
 
+        # 语义关系编码
         # with object
         sigma = self.linearKC(self.linearNC(y).permute(0, 2, 1))  # bs, c, c
         A = torch.matmul(SP.permute(0, 2, 1), torch.matmul(sigma, SP))  # bs, n, n
@@ -140,10 +141,12 @@ class AE(nn.Module):
         se_y = self.gnn(A, y) + y
 
 
+        # 空间关系编码
         # no spatial
         # y = self.spatialgnn(y) + y
         sp_y = self.spatialgnn(y) + y
 
+        # 语义关系和空间关系的是逐元素相加
         # gate
         # y = self.gate(se_y, sp_y)
         y = se_y+sp_y

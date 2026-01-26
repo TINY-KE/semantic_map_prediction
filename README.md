@@ -1,28 +1,99 @@
-## 测试SALM版本  #数据集读取用的是HabitatDataOfflineSLAM
+## 基于关系推理和主动训练的室内语义地图预测方法
 
-python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs     --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_slam/    --save_nav_images
+### 配置环境 
 
-## 在NPZ数据集上计算方差和概率
- + python main.py --name temp_1_21.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs    --sem_map_test --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_v6/   --ensemble_size 4
- + 实现步骤 
-   + 融合全局地图: 【完成】 
-   + 保存全局地图为本地图片：【完成】
-   + dataload的时候，帧数多一些，会有问题吗？
-     + 暂时忽略
-   + 计算均值和方差，并保存target_pred和target_uncertainty为图片【完成】
-     + 目前只使用了两个参数不同的预测模型
-   + 保存四个模型的预测地图 
-     + 训练一个新模型 
-       + smp 原版              
-       + train_for_CJME_1  训练了50轮
-       + train_for_CJME_2_from_zeros  虽然中间断了，但是可用
-       + train_for_CJME_2_from_zeros_2  训练了50轮
+创建conda环境:
 
-     + python main.py --name train_for_CJME_1 --batch_size 1 --num_workers 1 --is_train --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs  --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_v6/  --num_epochs 50 --ensemble_dir path-model/smp
-     + 新模型保存在 /home/robotlab/semantic-map-prediction/zhjd_logs/train_for_CJME_1/checkpoints
-     + 可视化训练误差 tensorboard --logdir=~/semantic-map-prediction/zhjd_logs/train_for_CJME_1/tensorboard
-     + 取代论文中四个集成模型图片
-     + 
-   + 下一步, 从TbHJrupSAjP、oLBMNvg9in8两个场景中，超出反应target_pred和target_uncertainty的轨迹，加入到论文中 
+```
+conda create -n myenv python=3.8 -y
+conda activate myenv
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -y
+pip install -r requirements.txt
 
-    
+```
+
+安装 habitat-sim 和 habitat-lab:
+
+```` 
+# 克隆 habitat-lab
+git clone https://github.com/facebookresearch/habitat-lab.git
+cd habitat-lab
+git checkout v0.2.1
+
+# 初始化 submodule habitat-sim
+git submodule update --init --recursive
+cd habitat-sim
+git checkout v0.2.2
+````
+
+
+Clone the repository and install other requirements:
+
+```
+https://github.com/TINY-KE/semantic_map_prediction.git
+cd semantic_map_prediction;
+当前路径为$ROOT_PATH 
+```
+
+### 下载数据集
+
+
+下载数据集 [here](https://www.dropbox.com/scl/fi/4dpko4s8fhm1bj3lbx9ng/datasets.zip?rlkey=nuvpibd5cus5cioiqtk3v1fz2&dl=0),
+
+```
+your-datasets-path/
+  mp3d_objnav_episodes_tmp/
+    train/
+      1LXtFkjw3qL/
+        ep_1_40970_1LXtFkjw3qL.npz
+        ...
+    val/
+      VVfe2KiqLaN/
+        ep_1_16987_VVfe2KiqLaN.npz
+        ...
+    test/
+      2azQ1b91cZZ/
+        ep_1_1_2azQ1b91cZZ.npz
+        ...
+```
+
+
+
+### 使用方法
+
+#### 训练
+
+从零开始训练:
+
+```
+python main.py --name train-x --batch_size 1 --num_workers 1 --is_train --log_dir you-log-path --stored_episodes_dir you-datasets-path/mp3d_objnav_episodes_tmp/ --num_epochs 50
+```
+
+
+
+#### 预训练模型: 
+
+由 [此处](https://www.dropbox.com/scl/fo/z2kj03w1eq86sx33n91h2/h?rlkey=6wlpclxzblollb4wyhkf8i6a2&dl=0)下载, 并按以下路径放置
+
+```
+$ROOT_PATH/
+  model-path/
+      model-name/
+        model/
+          smp.pt
+```
+
+#### 在NPZ数据集上运行:
+
+```
+python main.py --name test --ensemble_dir model-path/model-name/ --log_dir your-log-dir --sem_map_test --stored_episodes_dir you-datasets-path/mp3d_objnav_episodes_tmp/ 
+```
+
+#### 在SLAM数据集上运行:
+
+待整理
+
+
+#### 在Habitat仿真环境中运行:
+
+待整理
