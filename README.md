@@ -25,4 +25,19 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
      + 
    + 下一步, 从TbHJrupSAjP、oLBMNvg9in8两个场景中，超出反应target_pred和target_uncertainty的轨迹，加入到论文中 
 
-    
+
+
+## 图神经网络的图片保存
++ ResNetUNetDAMLastLayerv2
+        ResNetUNetDAMLastLayerv2(n_channel_in=options.n_object_classes, n_class_out=options.n_object_classes)
++  class ResNetUNetDAMLastLayerv2(nn.Module):
+    其中AE模块在整个网络中承担了跨位置关系建模的功能，通过pool参数在不同尺度上建立特征间的关系
++ class AE(nn.Module):
+    sm_y = self.gnn(A, y) + y       语义关系推理
+    sp_y = self.spatialgnn(y) + y   空间关系推理
+    y = sm_y + sp_y         相加融合
+  + class SpatialGNN(nn.Module):  说明SpatialGNN是嵌套在AE内部的
+
+
+## 
+    + 

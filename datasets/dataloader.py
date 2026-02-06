@@ -180,7 +180,7 @@ class HabitatDataOfflineSLAM(Dataset):
         return self.number_of_episodes
 
     def __getitem__(self, idx):
-        FRAME_INTERVAL = 5  # 每隔多少帧采样一次
+        FRAME_INTERVAL = 1  # 每隔多少帧采样一次
 
         ep_file = self.episodes_file_list[idx]
         ep = np.load(ep_file)
