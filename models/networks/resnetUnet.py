@@ -239,7 +239,6 @@ class AM(nn.Module):
         '''x: bs, f, h, w
             SP: bs, C, h, w
         '''
-        # SP是类别关系矩阵 ˆA_Obj = W1 * X * W2
         SP = torch.softmax(SP, dim=1)
         SP = self.pool(SP)  # bs, C, h/2, w/2
         SP = SP.reshape(SP.shape[0], SP.shape[1], -1)  # bs, C, n
@@ -248,13 +247,15 @@ class AM(nn.Module):
         y = t
         # y = self.pool(t)  # bs, k, h/2, w/2
         size = y.shape
+        # 【论文】将X展平为X'
         y = y.reshape(y.shape[0], y.shape[1], -1)  # bs, k, n
 
         # no object
         # A = torch.matmul(y.permute(0, 2, 1), y)
 
-        # 语义关系邻接矩阵
+        # 【论文】sigma是类别关系矩阵 ˆA_Obj = W1 * X' * W2
         sigma = self.linearKC(self.linearNC(y).permute(0, 2, 1))  # bs, c, c
+        # 【论文】语义关系邻接矩阵
         A = torch.matmul(SP.permute(0, 2, 1), torch.matmul(sigma, SP))  # bs, n, n
 
         y = y.permute(0, 2, 1)  # bs, n, k
@@ -262,7 +263,7 @@ class AM(nn.Module):
         sm_y = self.gnn(A, y) + y
 
         # y = self.spatialgnn(y) + y
-        # 空间关系邻接矩阵
+        # 【论文】空间关系邻接矩阵
         sp_y = self.spatialgnn(y) + y
 
         # gate
