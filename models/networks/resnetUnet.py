@@ -20,7 +20,7 @@ class Visualizer:
     def __init__(self):
         pass
 
-    def save_matrix(self, A, full_path="adj_matrix"):
+    def save_grid_semantic_matrix(self, A, full_path="adj_matrix"):
         """
         可视化并保存邻接矩阵 A (Adjacency Matrix)
         """
@@ -39,7 +39,7 @@ class Visualizer:
             plt.ylabel("Spatial Node Index")
 
             # 同时保存 png 和 pdf (pdf方便论文无限放大)
-            file_name = f"adj_matrix_{i:03d}"
+            file_name = f"class_grid__matrix_{i:03d}"
 
             # 保存 PNG (预览快)
             plt.savefig(os.path.join(full_path, f"{file_name}.png"), dpi=300, bbox_inches='tight')
@@ -69,6 +69,56 @@ class Visualizer:
             file_name = f"pred_{i:04d}.png"
             plt.savefig(os.path.join(full_path, file_name), dpi=300)
             plt.close()
+
+    def save_class_semantic_matrix(self, sigma, full_path="sigma_matrix"):
+        """
+        可视化并保存类别相关性矩阵 sigma [BT, C, C]
+        """
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
+
+        matrices = sigma.detach().cpu().numpy()
+        num_samples = matrices.shape[0]
+
+        for i in range(num_samples):
+            mat = matrices[i]
+
+            plt.figure(figsize=(10, 8))
+            # 使用 'magma' 或 'rocket' 色系，这类色系在表达激活强度时视觉对比度更高
+            sns.heatmap(mat, cmap='viridis', robust=True, square=True)
+
+            plt.title(f"Dynamic Class Correlation (Sigma) - Sample {i}")
+            plt.xlabel("Category Index")
+            plt.ylabel("Category Index")
+
+            file_name = f"class_semantic_matrix_{i:04d}.png"
+            plt.savefig(os.path.join(full_path, file_name), dpi=300, bbox_inches='tight')
+            plt.close()
+
+    def save_grid_spatial_matrix(self, A_static, full_path="spatial_prior"):
+        """
+        可视化并保存静态的空间邻接矩阵 (Spatial Prior)
+        A_static 形状为 [N, N]
+        """
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
+
+        # 1. 转换并处理
+        adj = A_static.detach().cpu().numpy()
+
+        plt.figure(figsize=(10, 8))
+        # 空间矩阵通常数值范围较大，使用 robust=True 自动调整色彩范围
+        # sns.heatmap(adj, cmap='coolwarm', robust=True, square=True)  viridis
+        sns.heatmap(adj, cmap='viridis', robust=True, square=True)
+
+        plt.title("Static Spatial Distance Prior (Manhattan/Euler)")
+        plt.xlabel("Spatial Node Index")
+        plt.ylabel("Spatial Node Index")
+
+        # 2. 保存
+        plt.savefig(os.path.join(full_path, "class_spatial_matrix.png"), dpi=300, bbox_inches='tight')
+        plt.close()
+
 
 class ResNetUNet(nn.Module):
     def __init__(self, n_channel_in, n_class_out):
@@ -272,7 +322,7 @@ class AM(nn.Module):
 
         y = self.dropout(self.up(y.permute(0, 2, 1).reshape(size))) + t
         y = self.back(y)
-        return self.dropout(y), A
+        return self.dropout(y), A, sigma
 
 
 class ResNetUNetDAMLastLayerv2(nn.Module):
@@ -383,17 +433,15 @@ class ResNetUNetDAMLastLayerv2(nn.Module):
         x = self.upsample(x)
         x = torch.cat([x, x_original], dim=1)
         x = self.conv_original_size2(x)  # [B*T, 64, 64, 64 ]
-        x, up0_am = self.up0_last(x, input)
+        x, up0_am, sigma = self.up0_last(x, input)
 
-        # print("   [zhjd-debug-search] 保存关系矩阵 1 ")
-        # 传入 A 矩阵和当前的步数或场景 ID
-        self.viz.save_matrix(up0_am, full_path=step_name)
-        # print("   [zhjd-debug-search] 保存关系矩阵 2 ")
+        # 可视化
+        # self.viz.save_grid_semantic_matrix(up0_am, full_path=step_name)
+        # self.viz.save_class_semantic_matrix(sigma, full_path=step_name)
+        # self.viz.save_grid_spatial_matrix(self.up0_last.spatialgnn.A,  full_path=step_name)
 
         out = self.conv_last(x)  # [B*T, 27, 64, 64 ]
-        # print("   [zhjd-debug-search] 保存关系矩阵 3 ")
-        self.viz.save_output(out, full_path=step_name)
-        # print("   [zhjd-debug-search] 保存关系矩阵 4 ")
+        # self.viz.save_output(out, full_path=step_name)
 
         return out, up0_am
 
