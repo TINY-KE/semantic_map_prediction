@@ -21,14 +21,14 @@ class MapPredictorAM(nn.Module):
         self.cel_loss_objects = nn.CrossEntropyLoss()
         self.am_loss = nn.BCELoss()
 
-    def forward(self, batch, is_train=True):
+    def forward(self, batch, is_train=True, step_name="1"):
 
         step_ego_crops = batch['step_ego_grid_27']
         B, T, _, cH, cW = step_ego_crops.shape  # batch, sequence length, _, crop height, crop width
         # print("[zhjd-debug] batch['step_ego_grid_crops_spatial'].size(): ", batch['step_ego_grid_crops_spatial'].size())
         # print("[zhjd-debug] batch['step_ego_grid_27'].size(): ", batch['step_ego_grid_27'].size())
 
-        pred_maps_raw_objects, pred_am = self._segmentation_model(batch['step_ego_grid_27'])
+        pred_maps_raw_objects, pred_am = self._segmentation_model(batch['step_ego_grid_27'], step_name)
 
         # if self.with_img_segm:
             # for my models (sscnav, sscnav_light, cfnet, cmanet)

@@ -28,6 +28,13 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
 
 
 ## 图神经网络的图片保存
++ self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)
+  + 调用处：
+  + self.models_dict[n]['predictor_model'](batch)
++ def get_predictor_rsmp(options):
++ def get_mp_network(options):
+  + return MapPredictorAM(segmentation_model=get_mp_network(options),
+                                  map_loss_scale=options.map_loss_scale)
 + ResNetUNetDAMLastLayerv2
         ResNetUNetDAMLastLayerv2(n_channel_in=options.n_object_classes, n_class_out=options.n_object_classes)
 +  class ResNetUNetDAMLastLayerv2(nn.Module):
@@ -39,5 +46,5 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
   + class SpatialGNN(nn.Module):  说明SpatialGNN是嵌套在AE内部的
 
 
-## 
-    + 
+##
++ 

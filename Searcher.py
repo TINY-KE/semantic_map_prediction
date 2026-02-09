@@ -21,6 +21,7 @@ from sklearn.metrics import confusion_matrix
 import metrics
 import json
 import cv2
+from models.networks.resnetUnet import Visualizer
 
 
 class SearchTester(object):
@@ -73,6 +74,9 @@ class SearchTester(object):
             self.results_spatial[spatial] = {}
         self.results_spatial['spatial_all'] = {}
 
+        # 用于关系矩阵的可视化
+        self.num_matrix = 0
+
     def test_semantic_map(self):
         # 1. 数据加载器
         print("     [zhjd-debug-search], params test_batch_size: ", self.options.test_batch_size, ", num_workers:", self.options.num_workers)
@@ -121,9 +125,16 @@ class SearchTester(object):
                 ensemble_object_maps, ensemble_spatial_maps = [], []
                 N = len(self.models_dict) # numbers of models in the ensemble
                 print("   [zhjd-debug-search] range(self.options.ensemble_size): ", self.options.ensemble_size)
+                self.num_matrix += 1
+                step_str = str(self.num_matrix)
+                save_img_dir_ = f"{self.options.save_img_dir}/{scene_id}/{epsoid_name}/"
+                print("     [zhjd-debug-search] save_A_matrix: ", save_img_dir_)
+                if not os.path.exists(save_img_dir_):
+                    os.makedirs(save_img_dir_)
                 for n in range(self.options.ensemble_size):
-                    pred_output = self.models_dict[n]['predictor_model'](batch)
+                    pred_output = self.models_dict[n]['predictor_model'](batch, False, save_img_dir_)
                     ensemble_object_maps.append(pred_output['pred_maps_objects'].clone())
+                print("   [zhjd-debug-search] 保存关系矩阵 END ")
 
                 # 5. 集成模型平均预测
                 ensemble_object_maps = torch.stack(ensemble_object_maps)  # N x B x T x C x cH x cW   torch.Size([4, 1, 10, 27, 64, 64])

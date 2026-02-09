@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision import models
 from models.networks.GNN import GNN, SpatialGNN
+import datasets.util.viz_utils as viz_utils
 
 
 def convrelu(in_channels, out_channels, kernel, padding):
@@ -11,6 +12,63 @@ def convrelu(in_channels, out_channels, kernel, padding):
         nn.ReLU(inplace=True),
     )
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import torch.nn.functional as F
+class Visualizer:
+    def __init__(self):
+        pass
+
+    def save_matrix(self, A, full_path="adj_matrix"):
+        """
+        可视化并保存邻接矩阵 A (Adjacency Matrix)
+        """
+        # A 形状为 [BT, N, N]
+        matrices = A.detach().cpu().numpy()
+        num_samples = matrices.shape[0]
+        for i in range(num_samples):
+            adj = matrices[i]
+
+            plt.figure(figsize=(10, 8))
+            # 使用绘图顶刊常用的色彩映射 'rocket' 或 'viridis'
+            sns.heatmap(adj, cmap='viridis', robust=True, square=True)
+
+            plt.title(f"Dynamic Semantic Correlation adj_matrix")
+            plt.xlabel("Spatial Node Index")
+            plt.ylabel("Spatial Node Index")
+
+            # 同时保存 png 和 pdf (pdf方便论文无限放大)
+            file_name = f"adj_matrix_{i:03d}"
+
+            # 保存 PNG (预览快)
+            plt.savefig(os.path.join(full_path, f"{file_name}.png"), dpi=300, bbox_inches='tight')
+            # plt.savefig(os.path.join(self.save_dir, f"{name}.pdf"), bbox_inches='tight')
+            plt.close()
+
+    def save_output(self, out, full_path="prediction"):
+        """
+        可视化预测的语义地图（取通道最大值）
+        """
+        # out 形状为 [BT, 27, 64, 64]
+        # pred = torch.argmax(out[-1], dim=0).detach().cpu().numpy()
+        preds = out.argmax(dim=1).detach().cpu().numpy()
+
+        num_samples = preds.shape[0]
+        print(f"Saving {num_samples} semantic maps to {full_path}...")
+
+        for i in range(num_samples):
+            # 2. 调用工具函数编码颜色
+            # 假设 viz_utils.colorEncode 接受的是 [H, W] 的类索引矩阵
+            color_step_grid27 = viz_utils.colorEncode(preds[i])
+
+            plt.figure(figsize=(6, 6))
+            plt.imshow(color_step_grid27, cmap='tab20')  # 使用离散颜色表表示不同类别
+            plt.axis('off')
+            plt.title("Semantic Map Prediction")
+            file_name = f"pred_{i:04d}.png"
+            plt.savefig(os.path.join(full_path, file_name), dpi=300)
+            plt.close()
 
 class ResNetUNet(nn.Module):
     def __init__(self, n_channel_in, n_class_out):
@@ -168,19 +226,20 @@ class AM(nn.Module):
         self.linearNC = nn.Linear(N*N, C)
         self.gnn = GNN(inter_channels)
         self.spatialgnn = SpatialGNN(inter_channels, N, N)
+
         self.up = nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True)
         self.back = nn.Sequential(
             nn.Conv2d(inter_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU()
         )
-
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, x, SP):
         '''x: bs, f, h, w
             SP: bs, C, h, w
         '''
+        # SP是类别关系矩阵 ˆA_Obj = W1 * X * W2
         SP = torch.softmax(SP, dim=1)
         SP = self.pool(SP)  # bs, C, h/2, w/2
         SP = SP.reshape(SP.shape[0], SP.shape[1], -1)  # bs, C, n
@@ -194,6 +253,7 @@ class AM(nn.Module):
         # no object
         # A = torch.matmul(y.permute(0, 2, 1), y)
 
+        # 语义关系邻接矩阵
         sigma = self.linearKC(self.linearNC(y).permute(0, 2, 1))  # bs, c, c
         A = torch.matmul(SP.permute(0, 2, 1), torch.matmul(sigma, SP))  # bs, n, n
 
@@ -202,6 +262,7 @@ class AM(nn.Module):
         sm_y = self.gnn(A, y) + y
 
         # y = self.spatialgnn(y) + y
+        # 空间关系邻接矩阵
         sp_y = self.spatialgnn(y) + y
 
         # gate
@@ -241,9 +302,12 @@ class ResNetUNetDAMLastLayerv2(nn.Module):
         self.layer4_1x1 = convrelu(512, 512, 1, 0)
         self.layer4_ae = AE(2, 27, 512, 512, 512, pool=(32, 32), factor=1)
 
+        # FIXME:（U-Net的创新点1）以上为编码器部分
+        # FIXME:（U-Net的创新点2）以下为解码器部分
+
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.conv_up3 = convrelu(256 + 512, 512, 3, 1)
+        self.conv_up3 = convrelu(256 + 512, 512, 3, 1)   # 解码器中的 conv_up3 = convrelu(768, 512, 3, 1) 负责将这两个来自不同深度、不同性质的特征图融合并压缩回标准通道数。
         self.up3_ae = AE(4, 27, 512, 512, 512, pool=(16, 16), factor=1)
 
         self.conv_up2 = convrelu(128 + 512, 256, 3, 1)
@@ -262,7 +326,12 @@ class ResNetUNetDAMLastLayerv2(nn.Module):
 
         self.conv_last = nn.Conv2d(64, n_class_out, 1)
 
-    def forward(self, input):
+        # 可视化
+        self.viz = Visualizer()
+        # self.register_buffer('step_counter', torch.tensor(0))  # 使用 buffer 保证能随模型保存/加载
+
+
+    def forward(self, input, step_name="1"):
         B, T, C, cH, cW = input.shape
         input = input.view(B*T, C, cH, cW)
 
@@ -288,19 +357,19 @@ class ResNetUNetDAMLastLayerv2(nn.Module):
         x = self.upsample(layer4)  # [B*T, 512, 4, 4 ]
 
         layer3 = self.layer3_1x1(layer3)  # [B*T, 256, 4, 4 ]
-        x = torch.cat([x, layer3], dim=1)  # [B*T, 768, 4, 4 ]
+        x = torch.cat([x, layer3], dim=1)  # [B*T, 768, 4, 4 ]     # FIXME:（U-Net的创新点3）: 融合跳跃连接
         x = self.conv_up3(x)   # [B*T, 512, 4, 4 ]
         x = self.up3_ae(x, input)
 
         x = self.upsample(x)  # [B*T, 512, 8, 8 ]
         layer2 = self.layer2_1x1(layer2)  # [B*T, 128, 8, 8 ]
-        x = torch.cat([x, layer2], dim=1)  # [B*T, 640, 8, 8 ]
+        x = torch.cat([x, layer2], dim=1)  # [B*T, 640, 8, 8 ]     # FIXME:（U-Net的创新点3）: 融合跳跃连接
         x = self.conv_up2(x)  # [B*T, 256, 8, 8 ]
         x = self.up2_ae(x, input)
 
         x = self.upsample(x)  # [B*T, 256, 16, 16 ]
         layer1 = self.layer1_1x1(layer1)
-        x = torch.cat([x, layer1], dim=1)  # [B*T, 320, 16, 16 ]
+        x = torch.cat([x, layer1], dim=1)  # [B*T, 320, 16, 16 ]     # FIXME:（U-Net的创新点3）: 融合跳跃连接
         x = self.conv_up1(x)  # [B*T, 256, 16, 16 ]
         x = self.up1_ae(x, input)
 
@@ -315,7 +384,15 @@ class ResNetUNetDAMLastLayerv2(nn.Module):
         x = self.conv_original_size2(x)  # [B*T, 64, 64, 64 ]
         x, up0_am = self.up0_last(x, input)
 
+        # print("   [zhjd-debug-search] 保存关系矩阵 1 ")
+        # 传入 A 矩阵和当前的步数或场景 ID
+        self.viz.save_matrix(up0_am, full_path=step_name)
+        # print("   [zhjd-debug-search] 保存关系矩阵 2 ")
+
         out = self.conv_last(x)  # [B*T, 27, 64, 64 ]
+        # print("   [zhjd-debug-search] 保存关系矩阵 3 ")
+        self.viz.save_output(out, full_path=step_name)
+        # print("   [zhjd-debug-search] 保存关系矩阵 4 ")
 
         return out, up0_am
 
