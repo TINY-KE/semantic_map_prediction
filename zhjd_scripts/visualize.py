@@ -45,7 +45,7 @@ class ObjNavEpisodeDataset(Dataset):
         # ego_grid_crops_spatial = torch.from_numpy(ep['ego_grid_crops_spatial'][-10:])
         # step_ego_grid_crops_spatial = torch.from_numpy(ep['step_ego_grid_crops_spatial'][-10:])
         # gt_grid_crops_spatial = torch.from_numpy(ep['gt_grid_crops_spatial'][-10:])
-        # gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-10:])
+        gt_grid_crops_objects = torch.from_numpy(ep['gt_grid_crops_objects'][-10:])
 
         # # 计算相对位姿
         # rel_pose = []
@@ -58,13 +58,13 @@ class ObjNavEpisodeDataset(Dataset):
             # 'ego_grid_crops_spatial': ego_grid_crops_spatial,
             # 'step_ego_grid_crops_spatial': step_ego_grid_crops_spatial,
             # 'gt_grid_crops_spatial': gt_grid_crops_spatial,
-            # 'gt_grid_crops_objects': gt_grid_crops_objects,
+            'gt_grid_crops_objects': gt_grid_crops_objects,
 
             'images': torch.from_numpy(ep['images'][-10:]),
             'gt_segm': torch.from_numpy(ep['ssegs'][-10:]).type(torch.int64),
             'depth_imgs': torch.from_numpy(ep['depth_imgs'][-10:]),
 
-            # 'pred_ego_crops_sseg': torch.from_numpy(ep['pred_ego_crops_sseg'][-10:]),
+            'pred_ego_crops_sseg': torch.from_numpy(ep['pred_ego_crops_sseg'][-10:]),
             'step_ego_grid_27': torch.from_numpy(ep['step_ego_grid_27'][-10:])
         }
 
@@ -83,7 +83,7 @@ def visualize_item(item, timestep=0):
     segm_np = segm.numpy()
     depth_np = depth.numpy()
 
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5), dpi=200)
     axs[0].imshow(rgb_np)
     axs[0].set_title("RGB Image")
     axs[0].axis("off")
@@ -105,6 +105,11 @@ def normalize_rgb(rgb_tensor):
     支持范围为 [0, 1] 或 [-1, 1]
     """
     rgb_np = rgb_tensor.detach().cpu().numpy()
+
+    # 2. 核心修改：检查维度顺序。如果是 (3, H, W)，转置为 (H, W, 3)
+    if rgb_np.ndim == 3 and rgb_np.shape[0] == 3:
+        rgb_np = rgb_np.transpose(1, 2, 0)
+
     if rgb_np.dtype in [np.float32, np.float64]:
         if rgb_np.max() <= 1.0 and rgb_np.min() >= 0.0:
             rgb_np = rgb_np * 255.0
@@ -125,7 +130,7 @@ def tensor_to_np(t):
     return t
 
 
-def visualize_all_fields_colorized(item, timestep=0):
+def visualize_all_fields_colorized(item, timestep=0, save_path=None):
     """
     使用 viz_utils.colorize_grid 可视化 episode 的关键字段。
     自动补齐输入维度并统一输出维度以适配 imshow。
@@ -136,11 +141,11 @@ def visualize_all_fields_colorized(item, timestep=0):
     rgb = normalize_rgb(item['images'][timestep])
     segm = tensor_to_np(item['gt_segm'][timestep])
     depth = tensor_to_np(item['depth_imgs'][timestep])
-    # pred_semantic_grid_map = tensor_to_np(item['pred_ego_crops_sseg'][timestep])
+    pred_semantic_grid_map = tensor_to_np(item['pred_ego_crops_sseg'][timestep])
     # ego_spatial = tensor_to_np(item['ego_grid_crops_spatial'][timestep])
     # step_ego_spatial = tensor_to_np(item['step_ego_grid_crops_spatial'][timestep])
     # gt_spatial = tensor_to_np(item['gt_grid_crops_spatial'][timestep])
-    # gt_objects = tensor_to_np(item['gt_grid_crops_objects'][timestep])
+    gt_objects = tensor_to_np(item['gt_grid_crops_objects'][timestep])
     step_grid_27 = tensor_to_np(item['step_ego_grid_27'][timestep])
 
     # # === 如果预测语义是 C×H×W，取 argmax ===
@@ -168,12 +173,13 @@ def visualize_all_fields_colorized(item, timestep=0):
     # color_ego_spatial = color_and_extract(ego_spatial, 3)
     # color_step_spatial = color_and_extract(step_ego_spatial, 3)
     # color_gt_spatial = color_and_extract(gt_spatial, 3)
-    # color_gt_objects = color_and_extract(gt_objects, 27)
+    color_gt_objects = color_and_extract(gt_objects, 27)
     # color_pred_semantic = color_and_extract(pred_semantic_grid_map, 27)
     # color_step_grid27 = color_and_extract(step_grid_27.argmax(axis=0), 27)
     color_step_grid27 = viz_utils.colorEncode(step_grid_27.argmax(axis=0))
+    color_single_grid27 = viz_utils.colorEncode(pred_semantic_grid_map.argmax(axis=0))
     # === 绘图 ===
-    fig, axs = plt.subplots(2, 2, figsize=(20, 20))
+    fig, axs = plt.subplots(2, 3, figsize=(20, 20), dpi=100)
     axs = axs.flatten()
 
     axs[0].imshow(rgb)
@@ -189,15 +195,15 @@ def visualize_all_fields_colorized(item, timestep=0):
 
 
 
-    # axs[3].imshow(color_pred_semantic)
-    # axs[3].set_title("Predicted Semantic ")
+    axs[3].imshow(color_single_grid27)
+    axs[3].set_title("Single Predicted Semantic ")
 
 
-    axs[3].imshow(color_step_grid27)
-    axs[3].set_title("Bayesian Fusion, RSMPNet's Input (step_ego_grid_27)")   # 最关键，RSMPNet的输入，只是通过贝叶斯的融合。因此在这个工作中，不涉及语义分割。
+    axs[4].imshow(color_step_grid27)
+    axs[4].set_title("Bayesian Fusion, RSMPNet's Input (step_ego_grid_27)")   # 最关键，RSMPNet的输入，只是通过贝叶斯的融合。因此在这个工作中，不涉及语义分割。
 
-    # axs[5].imshow(color_gt_objects)
-    # axs[5].set_title("GT Objects ")
+    axs[5].imshow(color_gt_objects)
+    axs[5].set_title("GT Objects ")
 
 
 
@@ -216,9 +222,17 @@ def visualize_all_fields_colorized(item, timestep=0):
         ax.axis('off')
 
     plt.tight_layout()
-    plt.show()
+
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        print(f"💾 已保存: {save_path}")
+        plt.close(fig)  # 必须关闭窗口，否则会占用大量内存
+    else:
+        plt.show()
 
     print(f"✅ timestep={timestep} 可视化完成。")
+
 
 
 object_id_to_name = {
@@ -255,8 +269,11 @@ object_id_to_name = {
 # 主函数入口
 # ----------------------------
 if __name__ == "__main__":
-    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
-    ep_path = root_path + '/' + 'ep_1_1_2azQ1b91cZZ.npz'
+    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/train/8WUmhLawc2A"
+    ep_path = root_path + '/' + 'ep_186_27974_8WUmhLawc2A.npz'
+    ep_path = root_path + '/' + 'ep_189_47514_8WUmhLawc2A.npz'
+    ep_path = root_path + '/' + 'ep_161_43289_8WUmhLawc2A.npz'
+    ep_path = root_path + '/' + 'ep_20_30819_8WUmhLawc2A.npz'
     # ep_path = "/home/robotlab/work/semantic-segmentation-pytorch/save_results/virtual_robot_outputs.npz"
 
     # ep_path = '/home/robotlab/dataset/MP3D_dataset/v1/tasks/mp3d_habitat/NPZ/train/HxpKQynjfin/ep_1_1_HxpKQynjfin.npz'
@@ -320,6 +337,14 @@ if __name__ == "__main__":
     #     print(f"\n=== 可视化时间步 {t} ===")
     #     visualize_item(item, timestep=t)
 
+    output_dir = os.path.join("output_images")
+
+    # 创建保存文件夹
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"📂 创建目录: {output_dir}")
+
     for t in range(10):
         print(f"🕒 时间步 {t}")
-        visualize_all_fields_colorized(item, timestep=t)
+        save_file_path = os.path.join(output_dir, f"timestep_{t:02d}.png")
+        visualize_all_fields_colorized(item, timestep=t, save_path=save_file_path)

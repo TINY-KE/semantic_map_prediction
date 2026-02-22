@@ -714,8 +714,41 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
         # step_ego_grid_27_single = color_and_extract(step_ego_grid_27[0, t, :, :, :], 27)
         # pred_maps_objects_single = color_and_extract(pred_maps_objects[0, t, :, :, :], 27)  # RSMP的输出 pred_maps_objects
         step_ego_grid_27_single = colorEncode(step_ego_grid_27[0, t, :, :, :].argmax(axis=0))
-        pred_maps_objects_single = colorEncode(pred_maps_objects[0, t, :, :, :].argmax(axis=0))
 
+        # 是否将预测图叠加到step_ego_grid_27上
+        flag_map_overlay = 2
+        if flag_map_overlay == 0:
+            pred_maps_objects_single = colorEncode(pred_maps_objects[0, t, :, :, :].argmax(axis=0))
+        elif flag_map_overlay == 1:
+            pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]      # [27,64,64]
+            pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]        # [27,64,64]
+            # 计算 bottom 层每个栅格的 argmax
+            val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+            # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+            fail_mask = (idx_bottom == 0) | (idx_bottom == 17)
+            # 3. 初始化最终的融合地图
+            # 我们先完整复制 bottom 的数据
+            fused_map = pred_maps_objects_bottom.clone()
+            # 4. 执行叠加逻辑：
+            # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+            # 这里使用广播机制处理 27 个通道
+            fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+            pred_maps_objects_single = colorEncode(fused_map.argmax(axis=0))
+        elif flag_map_overlay == 2:
+            pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]      # [27,64,64]
+            pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]        # [27,64,64]
+            # 计算 bottom 层每个栅格的 argmax
+            val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+            # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+            fail_mask = (idx_bottom != 15) # 只保留贝叶斯更新中的墙
+            # 3. 初始化最终的融合地图
+            # 我们先完整复制 bottom 的数据
+            fused_map = pred_maps_objects_bottom.clone()
+            # 4. 执行叠加逻辑：
+            # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+            # 这里使用广播机制处理 27 个通道
+            fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+            pred_maps_objects_single = colorEncode(fused_map.argmax(axis=0))
 
         # === 六宫格保存本地===
         fig, axs = plt.subplots(3, 2, figsize=(30, 30))

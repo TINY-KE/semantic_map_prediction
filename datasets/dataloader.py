@@ -77,7 +77,8 @@ class HabitatDataOfflineMPv2(Dataset):
 
         ep = np.load(ep_file)
         epsoid_name = (ep_file.split('/')[-1]).split('.')[0]
-        scene_id = epsoid_name.split('_')[-1]
+        # scene_id = epsoid_name.split('_')[-1]
+        scene_id = ep_file.split('/')[-2]
         print('     [zhjd-debug] ep file dir: ', ep_file)
         print('     [zhjd-debug] scene_id: ', scene_id)
         print('     [zhjd-debug] epsoid_name: ', epsoid_name)
@@ -185,8 +186,8 @@ class HabitatDataOfflineSLAM(Dataset):
         ep_file = self.episodes_file_list[idx]
         ep = np.load(ep_file)
         epsoid_name = (ep_file.split('/')[-1]).split('.')[0]
-        scene_id = epsoid_name.split('_')[-1]
-
+        # scene_id = epsoid_name.split('_')[-1]
+        scene_id = ep_file.split('/')[-2]
         print('     [zhjd-debug-slam] ep file dir: ', ep_file)
         print('     [zhjd-debug-slam] scene_id: ', scene_id)
         print('     [zhjd-debug-slam] epsoid_name: ', epsoid_name)

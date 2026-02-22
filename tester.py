@@ -291,6 +291,7 @@ class SemMapSLAMer(object):
             # batch = {k: v.to(self.device) for k, v in batch.items() if k != 'name'}
             scene_id = batch['scene_id'][0]  # 比如 ['TbHJrupSAjP']
             epsoid_name = batch['epsoid_name'][0]  # 比如 ['ep_43_72_TbHJrupSAjP']
+
             skip_keys = {'name', 'epsoid_name', 'scene_id'}
             batch = {
                 k: (v.to(self.device) if isinstance(v, torch.Tensor) else v)

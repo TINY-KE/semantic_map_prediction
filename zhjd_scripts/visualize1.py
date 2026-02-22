@@ -222,8 +222,8 @@ def visualize_all_fields(item, timestep=0):
 if __name__ == "__main__":
     root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
     ep_path = root_path + '/' + 'ep_92_148_2azQ1b91cZZ.npz'
-    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/test_old/2azQ1b91cZZ"
-    ep_path = root_path + '/' + 'ep_1_1_2azQ1b91cZZ.npz'
+    root_path = "/home/robotlab/dataset/semantic/semantic_datasets/data_v6/train/8WUmhLawc2A"
+    ep_path = root_path + '/' + 'ep_1_5351_8WUmhLawc2A.npz'
     # root_path = "/home/robotlab/dataset/MP3D_dataset/v1/tasks/mp3d_habitat_scenes_dir/NPZ/train/HxpKQynjfin"
     # ep_path = root_path + '/' + 'ep_1_1_HxpKQynjfin.npz'
 
