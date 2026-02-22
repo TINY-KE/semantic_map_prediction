@@ -25,6 +25,7 @@ if __name__ == '__main__':
             print("     [zhjd-debug] Testing semantic map prediction...")
             tester.test_semantic_map()
         else:
-            slamer = SemMapSLAMer(options)
+            # slamer = SemMapSLAMer(options)
+            slamer = SearchSLAMer(options)
             print("     [zhjd-debug] SLAM semantic map prediction...")
             slamer.test_semantic_map()

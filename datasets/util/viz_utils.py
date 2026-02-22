@@ -840,6 +840,107 @@ def save_all_infos_and_mapprediction_Global(batch, local_pred_maps_objects, glob
     print(f"✅ 已保存输入信息和EGO语义地图: {savepath}")
 
 
+def save_all_infos_and_mapprediction_Global_forSLAM(batch, local_pred_maps_objects, global_maps_objects, savepath, name):
+    # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial',
+    # 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
+    images = batch['images']
+    ssegs = batch['gt_segm']  # 物体分割真值
+    depth_imgs = batch['depth_imgs']
+
+    step_ego_grid_27 = batch['step_ego_grid_27']
+
+    B, T, _, cH, cW = step_ego_grid_27.shape
+    for t in range(T):
+        # print(f"🕒 时间步 {t}")
+        images_single = images[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        ssegs_single = ssegs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+        depth_imgs_single = depth_imgs[0, t, :, :, :].detach().cpu().permute(1, 2, 0).numpy()
+
+        step_ego_grid_27_single = color_and_extract(step_ego_grid_27[0, t, :, :, :], 27)
+        pred_maps_objects_single = color_and_extract(local_pred_maps_objects[0, t, :, :, :], 27)
+
+        global_maps_objects_single = color_and_extract(global_maps_objects[0, t, :, :, :], 27)
+
+
+        # === 九宫格保存本地===
+        fig, axs = plt.subplots(3, 2, figsize=(20, 20))
+        axs = axs.flatten()
+
+        imgs = [
+            (images_single, "RGB Image", None),
+            (ssegs_single, "MIT Segmentation", 'tab20'),
+            (depth_imgs_single, "Depth", 'viridis'),
+            (step_ego_grid_27_single, "RGB Project", None),
+            (pred_maps_objects_single, "Refined Semantic Map", None),
+            (global_maps_objects_single, "Global Semantic Map", None)
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(savepath, f"{name}_t{t}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+    print(f"✅ 已保存输入信息和EGO语义地图: {savepath}")
+
+
+import os
+import torch
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def save_Global_forSLAM(global_maps_objects, savepath, name):
+    """
+    参数:
+        global_maps_objects: [B, T, 27, H, W]
+        savepath: 保存路径
+        name: 文件名前缀
+    """
+    # 确保保存路径存在
+    os.makedirs(savepath, exist_ok=True)
+
+    # 1. 维度提取
+    # 注意：这里我们使用 .detach().cpu() 确保数据在内存中处理
+    global_maps = global_maps_objects.detach().cpu()
+    B, T, C, cH, cW = global_maps.shape
+
+    print(f"开始渲染并保存全局地图序列 (共 {T} 帧)...")
+
+    # 2. 预先创建 Figure 对象，避免在循环中重复创建
+    # 这样能极大提高保存速度
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    for t in range(T):
+        # 3. 提取当前帧并转换
+        # global_maps[0, t] 形状为 [27, H, W]
+        # argmax(0) 得到类别索引图 [H, W]
+        current_grid = global_maps[0, t]
+
+        # 使用你定义的上色逻辑
+        # 假设 color_and_extract 接受 [27, H, W] 并返回 RGB 图像
+        global_maps_objects_single = color_and_extract(current_grid, 27)
+
+        # 4. 清除上一帧内容并显示新帧
+        ax.clear()
+        ax.imshow(global_maps_objects_single)
+        ax.set_title(f"{name} - Timestep {t:03d}")
+        ax.axis('off')
+
+        # 5. 构造文件名并保存
+        save_file = os.path.join(savepath, f"{name}_t{t:03d}.png")
+        # 使用较低的 dpi 可以显著加快保存速度，除非你需要极高精度
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0.1, dpi=150)
+
+    # 6. 最后关闭 Figure 释放资源
+    plt.close(fig)
+    print(f"✅ 已保存 {T} 张全局语义地图至: {savepath}")
+
 # zhjd
 def colorEncode(label_map, color_mapping=color_mapping_27):
     """

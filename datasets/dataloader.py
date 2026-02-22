@@ -160,6 +160,12 @@ class HabitatDataOfflineSLAM(Dataset):
         self.object_labels = options.n_object_classes  # 物体类别数
         self.episodes_dir = options.stored_episodes_dir  # 存储 episodes 的目录
 
+        # 地图参数  zhjd 手动设定
+        self.spatial_labels = 3
+        self.grid_dim = (300, 300)
+        self.cell_size = 0.1
+        self.crop_size = (64, 64)
+
         # if self.img_segm:
             # self.episodes_imgSegm_dir = options.stored_imgSegm_episodes_dir
             # self.episodes_dir = options.stored_episodes_dir
@@ -205,9 +211,15 @@ class HabitatDataOfflineSLAM(Dataset):
         item['depth_imgs'] = torch.from_numpy(ep['depth_imgs'][indices])  # [T', 1, H, W]
         item['step_ego_grid_27'] = torch.from_numpy(ep['step_ego_grid_27'][indices])  # [T', 27, H, W]
 
-        # 位姿也同步采样（如果你后续需要）
-        # abs_pose = ep['virtual_robot_ground_poses'][indices]
-        # rel_pose = 计算相对位姿...
+        # zhjd: 以下操作是为了便于之后“全局地图融合”
+        abs_pose = ep['virtual_robot_ground_poses'][indices]
+        # rel_pose = []
+        # for i in range(abs_pose.shape[0]):
+        #     rel_pose.append(utils.get_rel_pose(pos2=abs_pose[i, :], pos1=abs_pose[0, :]))
+        # item['rel_pose'] = torch.from_numpy(np.asarray(rel_pose)).float()
+        # item['abs_pose'] = torch.from_numpy(abs_pose).float()
+        item['rel_pose'] = torch.from_numpy(np.asarray(abs_pose)).float()
+        item['abs_pose'] = torch.zeros((total_time_steps, 3), dtype=torch.float32)
 
         item['epsoid_name'] = epsoid_name
         item['scene_id'] = scene_id
