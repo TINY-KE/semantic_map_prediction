@@ -124,7 +124,7 @@ class SemanticGrid(object):
             normalization_grid = torch.sum(mul_probs_grid, dim=1, keepdim=True)
             # 5. 对每个像素，在所有类别之间做归一化，得到新的概率分布
             self.sem_grid = mul_probs_grid / normalization_grid.repeat(1, self.object_labels, 1, 1)
-            # 5. 6. 保存每一步的中间结果
+            # 6. 保存每一步的中间结果
             step_geo_grid[:,i,:,:,:] = self.sem_grid.clone()
         return step_geo_grid  # 形状为 torch.Size([1, 10, 27, 400, 400])
 
@@ -204,3 +204,47 @@ class SemanticGrid(object):
 
         return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0)) # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
 
+
+    def update_sem_grid_bayes_binzhou(self, geo_grid, lambda_new = 2.0):
+        # Input geo_grid -- B x T x num_of_classes x grid_dim x grid_dim
+        # Update the class probabilities at each location of the grid using Bayes rule
+        # geo_grid contains the single view observations of the sequence
+        step_geo_grid = torch.zeros((geo_grid.shape[0], geo_grid.shape[1], self.object_labels,
+                                                self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32).to(geo_grid.device)
+        # 2. 遍历时间序列中的每一帧
+        for i in range(geo_grid.shape[1]): # sequence length
+            new_obsv_grid = geo_grid[:,i,:,:,:]
+            # 3. 在self.sem_grid的基础上，进行融合
+            flag_method = 2
+            if flag_method == 1:  # 贝叶斯融合
+                mul_probs_grid = (new_obsv_grid**lambda_new)  * self.sem_grid
+            elif flag_method == 2:  # 线性加权：
+                mul_probs_grid = lambda_new * new_obsv_grid + self.sem_grid
+
+            # 4. 对类别维求和，得到归一化因子（每个 pixel 的总概率）
+            normalization_grid = torch.sum(mul_probs_grid, dim=1, keepdim=True)
+
+            # 5. 对每个像素，在所有类别之间做归一化，得到新的概率分布
+            # self.sem_grid = mul_probs_grid / normalization_grid.repeat(1, self.object_labels, 1, 1)
+            eps = 1e-9
+            self.sem_grid = mul_probs_grid / (normalization_grid + eps)  # # 使用广播机制替代 repeat，更省显存，加 eps 保证稳定性
+
+            # 6. 保存每一步的中间结果
+            step_geo_grid[:,i,:,:,:] = self.sem_grid.clone()
+
+        return step_geo_grid  # 形状为 torch.Size([1, 10, 27, 400, 400])
+
+    # 每个时间戳下的更新，是在上一时间戳基础上进行的。详情参考update_sem_grid_bayes函数
+    def register_sem_pred_binzhou(self, prediction_crop, pose, abs_pose):
+        B, T, C, cH, cW = prediction_crop.shape
+        # L2M原版：初始值设为 1 / C
+        ego_pred_map = torch.zeros((T, C, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32,
+                                  device=self.device) * (1 / C)
+        # # ZHJD版：初始值设为0
+        # ego_pred_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
+        ego_pred_map[:, :, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(
+            0)
+        # 进行位姿变换（局部 → 全局）
+        geo_pred_map = self.spatialTransformer(grid=ego_pred_map, pose=pose, abs_pose=abs_pose)
+
+        return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])

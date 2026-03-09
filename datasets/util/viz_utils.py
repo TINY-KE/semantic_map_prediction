@@ -716,7 +716,7 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
         step_ego_grid_27_single = colorEncode(step_ego_grid_27[0, t, :, :, :].argmax(axis=0))
 
         # 是否将预测图叠加到step_ego_grid_27上
-        flag_map_overlay = 2
+        flag_map_overlay = 0
         if flag_map_overlay == 0:
             pred_maps_objects_single = colorEncode(pred_maps_objects[0, t, :, :, :].argmax(axis=0))
         elif flag_map_overlay == 1:

@@ -357,6 +357,10 @@ class SearchSLAMer(object):
         # 用于关系矩阵的可视化
         self.num_matrix = 0
 
+        # 初始化全局语义地图
+        self.sg = SemanticGrid(1, self.test_ds.grid_dim, self.test_ds.crop_size[0], self.test_ds.cell_size,
+                          spatial_labels=self.test_ds.spatial_labels, object_labels=self.test_ds.object_labels)
+
     def test_semantic_map(self):
         # 1. 数据加载器
         print("     [zhjd-slam-search], params test_batch_size: ", self.options.test_batch_size, ", num_workers:", self.options.num_workers)
@@ -425,9 +429,7 @@ class SearchSLAMer(object):
 
 
                 # 6. todo: 将预测逐步融合进全局地图
-                # 初始化全局语义地图
-                sg = SemanticGrid(1, self.test_ds.grid_dim, self.test_ds.crop_size[0], self.test_ds.cell_size,
-                                  spatial_labels=self.test_ds.spatial_labels, object_labels=self.test_ds.object_labels)
+
                 # 6.1 计算位姿
                 abs_poses = []  # 每步的绝对位姿，用于坐标变换与地图配准
                 # agent_height = []
@@ -465,7 +467,13 @@ class SearchSLAMer(object):
                 #         [-0.6204,  0.2856,  0.0000],
                 #         [-0.7648,  0.4897,  0.0000],
                 #         [-0.9092,  0.6938,  0.0000]], device='cuda:0')
+                pose_coords_list = tutils.get_coord_pose_for_robot_center(self.sg, _rel_pose, _abs_poses[0],
+                                                                          self.test_ds.grid_dim[0],
+                                                                          self.test_ds.cell_size,
+                                                                          self.device)  # B x T x 3
 
+                # print("pose_coords_list: ", pose_coords_list)  # 10个, shape为[10, 1, ]
+                # print("pose_coords_list.shape: ", pose_coords_list.shape)  # torch.Size([10, 1, 2])
 
                 # 6.2 计算不确定度
                 # add crop uncertainty to uncertainty map  用于物体搜索的目标选择
@@ -478,16 +486,33 @@ class SearchSLAMer(object):
                     ensemble_var[:, :, :, i, :, :] = ensemble_class_var
                 # TODO: 各类像素的不确定性图
                 per_class_uncertainty = ensemble_var.squeeze(0)  # B x T x C x cH x cW
-                step_uncertainty = sg.register_per_class_uncertainty(per_class_uncertainty_crop=per_class_uncertainty, pose=_rel_pose, abs_pose=_abs_poses)
+                step_uncertainty = self.sg.register_per_class_uncertainty(per_class_uncertainty_crop=per_class_uncertainty, pose=_rel_pose, abs_pose=_abs_poses)
 
-                # 6.3 全局地图
+                # 6.3 用墙来修正预测
+                step_ego_grid_27 = batch['step_ego_grid_27']
+                for t in range(T):
+                    pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]  # [27,64,64]
+                    pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]  # [27,64,64]
+                    # 计算 bottom 层每个栅格的 argmax
+                    val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+                    # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+                    fail_mask = (idx_bottom != 15)  # 只保留贝叶斯更新中的墙
+                    # 3. 初始化最终的融合地图
+                    # 我们先完整复制 bottom 的数据
+                    fused_map = pred_maps_objects_bottom.clone()
+                    # 4. 执行叠加逻辑：
+                    # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+                    # 这里使用广播机制处理 27 个通道
+                    fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+                    pred_maps_objects[0, t, :, :, :] = fused_map
+
+                # 6.4 全局地图
                 # 添加到全局地图 add semantic prediction to semantic map
-                step_geo_grid = sg.register_sem_pred(prediction_crop=pred_maps_objects, pose=_rel_pose, abs_pose=_abs_poses)  # 形状为 torch.Size([1, 10, 27, 400, 400])
+                step_geo_grid = self.sg.register_sem_pred_binzhou(prediction_crop=pred_maps_objects, pose=_rel_pose, abs_pose=_abs_poses)  # 形状为 torch.Size([1, 10, 27, 400, 400])
                 # print("   [zhjd-slam-search] step_geo_grid.shape: ", step_geo_grid.shape)    torch.Size([1, 10, 27, 300, 300])
                 # print("   [zhjd-slam-search] step_uncertainty.shape: ", step_uncertainty.shape)   torch.Size([1, 10, 27, 300, 300])
 
                 # ltg_dist = torch.linalg.norm(ltg.clone().float()-pose_coords.float())*self.options.cell_size # distance to current long-term goal
-
 
                 # 7. （可选）可视化保存
                 # Option to save visualizations of steps
@@ -497,6 +522,7 @@ class SearchSLAMer(object):
                     print("     [zhjd-slam-search] save_img_dir_: ", save_img_dir_)
                     if not os.path.exists(save_img_dir_):
                         os.makedirs(save_img_dir_)
+                    viz_utils.save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath=save_img_dir_, name='path')
                     viz_utils.save_Global_forSLAM(step_geo_grid, savepath=save_img_dir_, name='global')
                     # viz_utils.save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list.clone().cpu().numpy(), save_img_dir_, timestamp_length=10)
                     # viz_utils.save_ensembles(ensemble_object_maps, pred_maps_objects, save_img_dir_=save_img_dir_)

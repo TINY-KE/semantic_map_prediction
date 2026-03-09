@@ -46,6 +46,11 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
   + class SpatialGNN(nn.Module):  说明SpatialGNN是嵌套在AE内部的
 
 
-## 在SLAM NPZ数据集上计算方差和概率
- + python main.py --name slam_search_2_22.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs   --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_binzhou_wjl/   --ensemble_size 1   --save_nav_images
- + python main.py --name slam_search_2_22.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs   --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_binzhou_wjl/   --ensemble_size 4    --save_nav_images
+## 滨州王佳莉家
++ 在SLAM NPZ数据集上预测地图
+  +  python main.py --name slam_search_2_24.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs   --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_binzhou_wjl_2/   --ensemble_size 1    --save_nav_images
++ 在SLAM NPZ数据集上计算方差和概率
+  + python main.py --name slam_search_2_22.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs   --stored_episodes_dir /home/robotlab/dataset/semantic/semantic_datasets/data_binzhou_wjl/   --ensemble_size 4    --save_nav_images
++ 由于SLAM数据集中，虽然被分成了多个NPZ文件，但是相互之间是连续的，因此需要融合
+  + 再MIT中
+

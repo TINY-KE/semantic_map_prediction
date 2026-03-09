@@ -181,6 +181,9 @@ class HabitatDataOfflineSLAM(Dataset):
         for scene in scenes_dir:
             for fil in os.listdir(episodes_dir + scene + "/"):
                 episodes_file_list.append(episodes_dir + scene + "/" + fil)
+
+        episodes_file_list.sort()
+
         return episodes_file_list
 
     def __len__(self):
