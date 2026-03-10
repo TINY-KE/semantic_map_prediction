@@ -191,6 +191,14 @@ class SemanticGrid(object):
         geo_per_class_uncertainty_maps = self.spatialTransformer(grid=ego_per_class_uncertainty_map, pose=pose, abs_pose=abs_pose)
         return self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
 
+    def register_per_class_uncertainty_ros_without_rot(self, per_class_uncertainty_crop, pose):
+        B, T, C, cH, cW = per_class_uncertainty_crop.shape
+        # 初始值设为 0
+        ego_per_class_uncertainty_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
+        ego_per_class_uncertainty_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = per_class_uncertainty_crop.squeeze(0)
+        geo_per_class_uncertainty_maps = self.spatialTransformer_ros_without_rot(grid=ego_per_class_uncertainty_map, pose=pose)
+        return self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
+
     # 每个时间戳下的更新，是在上一时间戳基础上进行的。详情参考update_sem_grid_bayes函数
     def register_sem_pred(self, prediction_crop, pose, abs_pose):
         B, T, C, cH, cW = prediction_crop.shape
@@ -248,3 +256,64 @@ class SemanticGrid(object):
         geo_pred_map = self.spatialTransformer(grid=ego_pred_map, pose=pose, abs_pose=abs_pose)
 
         return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+
+    def spatialTransformer_ros_without_rot(self, grid, pose):
+        # Input:
+        # grid -- sequence len x number of classes x grid_dim x grid_dim
+        # pose -- sequence len x 3
+        # abs_pose -- same as pose
+
+        #  torch.Size([1, 1, 300, 300]
+        geo_grid_out = torch.zeros((grid.shape[0], grid.shape[1], self.grid_dim[0], self.grid_dim[1]),
+                                   dtype=torch.float32).to(grid.device)
+
+
+        for j in range(grid.shape[0]):  # sequence length
+
+            grid_step = grid[j, :, :, :].unsqueeze(0)
+            pose_step = pose[j, :]
+
+            rel_coord = torch.tensor([pose_step[0], pose_step[1]], dtype=torch.float32).to(grid.device)
+            rel_coord = rel_coord.reshape((2, 1))
+
+            x = -2 * (rel_coord[0] / self.cell_size) / (self.grid_dim[0])  # 图片横向是x ，机器人的正向移动距离
+            y = -2 * (rel_coord[1] / self.cell_size) / (self.grid_dim[1])
+
+            angle = pose_step[2]
+
+            trans_theta = torch.tensor([[1, -0, x], [0, 1, y]], dtype=torch.float32).unsqueeze(0)
+            # rot_theta = torch.tensor(
+            #     [[torch.cos(angle), -1.0 * torch.sin(angle), 0], [torch.sin(angle), torch.cos(angle), 0]],
+            #     dtype=torch.float32).unsqueeze(0)
+            trans_theta = trans_theta.to(grid.device)
+            # rot_theta = rot_theta.to(grid.device)
+
+            trans_disp_grid = F.affine_grid(trans_theta, grid_step.size(),
+                                            align_corners=True)  # get grid translation displacement
+            # rot_disp_grid = F.affine_grid(rot_theta, grid_step.size(),
+            #                               align_corners=True)  # get grid rotation displacement
+
+            # rot_geo_grid = F.grid_sample(grid_step, rot_disp_grid.float(), mode='nearest',
+            #                              align_corners=True)  # apply rotation
+            # geo_grid = F.grid_sample(rot_geo_grid, trans_disp_grid.float(), mode='nearest',
+            #                          align_corners=True)  # apply translation
+            geo_grid = F.grid_sample(grid_step, trans_disp_grid.float(), mode='nearest',
+                                     align_corners=True)  # apply translation
+
+            geo_grid = geo_grid + 1e-12
+            geo_grid_out[j, :, :, :] = geo_grid
+
+        return geo_grid_out
+
+    def register_sem_pred_ros_without_rot(self, prediction_crop, pose):
+        B, T, C, cH, cW = prediction_crop.shape
+        # L2M原版：初始值设为 1 / C
+        ego_pred_map = torch.zeros((T, C, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32,
+                                  device=self.device) * (1 / C)
+        # # ZHJD版：初始值设为0
+        ego_pred_map[:, :, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(
+            0)
+        # 进行位姿变换（局部 → 全局）
+        geo_pred_map = self.spatialTransformer_ros_without_rot(grid=ego_pred_map, pose=pose)
+
+        return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])

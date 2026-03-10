@@ -394,6 +394,73 @@ def save_uncertainty(step_geo_grid, step_uncertainty, pose_coords_list, save_img
     print(f"✅ 已保存方差的结果: {save_img_dir_}")
 
 
+
+# zhjd 定制
+#  step_geo_grid.shape:  torch.Size([1, 10, 27, 300, 300])
+#  step_uncertainty.shape:  torch.Size([1, 10, 27, 300, 300]
+def save_uncertainty_ros(step_geo_grid, step_uncertainty, pose_coords_list, save_img_dir_, global_time):
+    step_geo_grid = step_geo_grid.squeeze(0)  # 变为[10, 27, 300, 300]
+    step_uncertainty = step_uncertainty.squeeze(0)  # 变为[10, 27, 300, 300]
+    for sem_lbl in [1, 3, 4, 5, 6, 13, 19]:
+        class_name = name_mapping_27.get(sem_lbl, "未知类别")
+        t = 0
+        # 1. 提取该类别的预测图（概率图）
+        target_pred = step_geo_grid[t, sem_lbl, :, :].unsqueeze(0)  # [1, H, W]
+        # ZHJD: 将等于 1/C 的位置置为 0. 去除屏幕边缘的黄色区域，为了美观
+        mask = (target_pred == (1.0 / 27.0))
+        target_pred[mask] = 0.0
+        target_pred = target_pred.permute(1, 2, 0).cpu().numpy() * 255.0
+
+        # 2. 提取该类别的不确定性图
+        target_uncertainty = step_uncertainty[t, sem_lbl, :, :].unsqueeze(0)
+        target_uncertainty = target_uncertainty.permute(1, 2, 0).cpu().numpy()
+        target_uncertainty /= np.amax(target_uncertainty)+ 1e-6  # 避免除 0
+        target_uncertainty = target_uncertainty * 255.0
+        #  3. 获取整个语义地图的彩色图
+        # color_sem_grid = colorize_grid(sg.sem_grid.unsqueeze(1))
+        # im = color_sem_grid[0, 0, :, :, :].permute(1, 2, 0).cpu().numpy()
+        color_sem_grid = colorize_grid(step_geo_grid[t].unsqueeze(0).unsqueeze(0))  # shape: [1, 1, H, W, 3]
+        im = color_sem_grid[0, 0].permute(1, 2, 0).cpu().numpy()
+
+        #  5. 裁剪中心区域（100x100）
+        # crop viz inputs to 128 x 128
+        area_size = 100  # area around the agent to be evaluated
+        # 只关注 agent 周围的局部区域，避免图太大
+        area_start = int((im.shape[0] / 2) - (area_size / 2))
+        area_end = int((im.shape[0] / 2) + (area_size / 2))
+        # 把彩色语义图、不确定性图、预测图都裁成 100x100
+        im = im[area_start:area_end, area_start:area_end, :]
+        target_uncertainty = target_uncertainty[area_start:area_end, area_start:area_end, :]
+        target_pred = target_pred[area_start:area_end, area_start:area_end, :]
+
+        #  6. 平移坐标（匹配裁剪后坐标系）
+        # translate coords   减去 area_start 是为了把坐标对齐到裁剪后的图像中
+        # ltg[0, 0, 0] -= area_start
+        # ltg[0, 0, 1] -= area_start
+        pose_x = pose_coords_list[t, 0, 0, 0].item() - area_start
+        pose_y = pose_coords_list[t, 0, 0, 1].item() - area_start
+
+        # 7. 可视化并保存图片
+        # 把三个图（语义地图、预测图、不确定性图）用 matplotlib 拼成 3 个 subplot
+        # 其中第一张图上添加了 agent 当前的位置（蓝色）和目标点位置（洋红色）
+        arr = [im, target_pred, target_uncertainty]
+        plt.figure(figsize=(20, 15))
+        for i, data in enumerate(arr):
+            ax = plt.subplot(1, 3, i + 1)
+            ax.axis('off')
+            plt.imshow(data)
+            if i == 0:
+                plt.scatter(pose_x, pose_y, color="blue", s=50)
+                # plt.scatter(ltg[0, 0, 0], ltg[0, 0, 1], color="magenta", s=50)
+
+        # 8. 保存图像为 PNG
+        filename = f"{class_name}_time-{global_time}.png"
+        filepath = save_img_dir_ + filename
+        plt.savefig(filepath, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+    print(f"✅ 已保存方差的结果: {save_img_dir_}")
+
+
 # 将语义地图（semantic map）、预测结果和不确定性图可视化并保存为一张图片
 # test_ds	测试集对象，含点云等信息
 # sg	语义地图对象（semantic grid），含有 sem_grid 和 per_class_uncertainty_map
@@ -934,6 +1001,66 @@ def save_Global_forSLAM(global_maps_objects, savepath, name):
 
         # 5. 构造文件名并保存
         save_file = os.path.join(savepath, f"{name}_t{t:03d}.png")
+        # 使用较低的 dpi 可以显著加快保存速度，除非你需要极高精度
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0.1, dpi=150)
+
+    # 6. 最后关闭 Figure 释放资源
+    plt.close(fig)
+    print(f"✅ 已保存 {T} 张全局语义地图至: {savepath}")
+
+
+def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, name):
+    """
+    参数:
+        global_maps_objects: [B, T, 27, H, W]
+        global_uncertainty: [B, T, 27, H, W]
+        savepath: 保存路径
+        name: 文件名前缀
+    """
+    # 确保保存路径存在
+    os.makedirs(savepath, exist_ok=True)
+
+    # 1. 维度提取
+    # 注意：这里我们使用 .detach().cpu() 确保数据在内存中处理
+    global_maps = global_maps_objects.detach().cpu()
+    global_uncertainty = global_map_uncertainty.detach().cpu()
+    B, T, C, cH, cW = global_maps.shape
+
+    print(f"开始渲染并保存全局地图序列 (共 {T} 帧)...")
+
+    # 2. 预先创建 Figure 对象，避免在循环中重复创建
+    #  修改 Figure 为 1x2 的布局
+    fig, axes = plt.subplots(1, 2, figsize=(20, 10))
+
+    for t in range(T):
+        # 3. 提取当前帧并转换
+        # global_maps[0, t] 形状为 [27, H, W]
+        # argmax(0) 得到类别索引图 [H, W]
+        current_grid = global_maps[0, t]
+
+        # 使用你定义的上色逻辑
+        # 假设 color_and_extract 接受 [27, H, W] 并返回 RGB 图像
+        global_maps_objects_single = color_and_extract(current_grid, 27)
+
+        # --- 不确定性部分 (sigma_map) ---
+        current_uncertainty = global_uncertainty[0, t]
+        max_uncertainty, _ = torch.max(current_uncertainty, dim=0, keepdim=True)
+        sigma_map = torch.sqrt(max_uncertainty).squeeze().numpy() # [H, W]
+
+        # 2. 渲染两张子图
+        axes[0].clear()
+        axes[0].imshow(global_maps_objects_single)
+        axes[0].set_title("Semantic Map")
+        axes[0].axis('off')
+
+        axes[1].clear()
+        # 使用 'jet' 或 'magma' 热力图显示不确定性，越亮代表越不确定
+        axes[1].imshow(sigma_map, vmin=0, vmax=1)
+        axes[1].set_title("Uncertainty (Sigma)")
+        axes[1].axis('off')
+
+        # 5. 构造文件名并保存
+        save_file = os.path.join(savepath, f"{name}.png")
         # 使用较低的 dpi 可以显著加快保存速度，除非你需要极高精度
         plt.savefig(save_file, bbox_inches='tight', pad_inches=0.1, dpi=150)
 

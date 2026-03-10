@@ -156,7 +156,10 @@ class TrainOptions(BaseOptions):
 
         # zhjd
         self.parser.add_argument('--save_nav_images', dest='save_nav_images', action='store_true',
-                                 help='Keep track and store maps during navigation testing')
+                                 help='save_nav_images')
+
+        self.parser.add_argument('--is_ros', dest='is_ros', action='store_true',
+                                 help='subscribe ros')
 
         self.parser.add_argument(
             '--save_img_dir',

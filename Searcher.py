@@ -411,7 +411,7 @@ class SearchSLAMer(object):
                 if not os.path.exists(save_img_dir_):
                     os.makedirs(save_img_dir_)
                 for n in range(self.options.ensemble_size):
-                    pred_output = self.models_dict[n]['predictor_model'](batch, False, save_img_dir_)
+                    pred_output = self.models_dict[n]['predictor_model'](batch, False, save_img_dir_) # 接口地点： self._segmentation_model(batch['step_ego_grid_27']
                     ensemble_object_maps.append(pred_output['pred_maps_objects'].clone())
 
                 # 5. 集成模型平均预测

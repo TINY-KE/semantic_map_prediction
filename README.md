@@ -54,3 +54,7 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
 + 由于SLAM数据集中，虽然被分成了多个NPZ文件，但是相互之间是连续的，因此需要融合
   + 再MIT中
 
+## 749实验室
++ 使用ROS接收栅格地图
+  + python main.py --name slam_search_2_24.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs    --ensemble_size 1    --is_ros  --save_nav_images
++ 
