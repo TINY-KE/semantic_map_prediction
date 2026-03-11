@@ -32,6 +32,8 @@ import message_filters
 from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 
+from frontier_utils.FrontierExtractor import FrontierExtractor
+
 class RosTester(object):
     """ Implements testing for prediction models
     """
@@ -43,26 +45,9 @@ class RosTester(object):
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # 1. 完整加载 Ensemble 模型逻辑
-        self.models_dict = {} # keys are the ids of the models in the ensemble
-        ensemble_exp_rsmp = os.listdir(self.options.ensemble_dir_rsmp) # ensemble_dir should be a dir that holds multiple experiments
-        ensemble_exp_rsmp.sort() # in case the models are numbered put them in order
-        for n in range(self.options.ensemble_size):
+        # 1.边界和地图处理
+        self.FrontierExtractor = FrontierExtractor()
 
-            print("     [zhjd-slam-search] RosTester Init Loading model ", n)
-            self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
-            self.models_dict[n] = {k:v.to(self.device) for k,v in self.models_dict[n].items()}
-
-            # Needed only for models trained with multi-gpu setting
-            self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
-
-            checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
-            print('checkpoint_dir', checkpoint_dir)
-
-            latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
-            print("Model", n, "loading checkpoint", latest_checkpoint)
-            self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
-            self.models_dict[n]["predictor_model"].eval()
 
         # 2. 状态缓冲区：T=10
         self.batch_size = 1
@@ -92,6 +77,28 @@ class RosTester(object):
         self.num_flag = 0
         self.prev_time = time.time()  # 初始化时间戳
         self.fps = 0.0
+
+        # 6. 完整加载 Ensemble 模型逻辑
+        # self.models_dict = {}  # keys are the ids of the models in the ensemble
+        # ensemble_exp_rsmp = os.listdir(
+        #     self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
+        # ensemble_exp_rsmp.sort()  # in case the models are numbered put them in order
+        # for n in range(self.options.ensemble_size):
+        #     print("     [zhjd-slam-search] RosTester Init Loading model ", n)
+        #     self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
+        #     self.models_dict[n] = {k: v.to(self.device) for k, v in self.models_dict[n].items()}
+        #
+        #     # Needed only for models trained with multi-gpu setting
+        #     self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
+        #
+        #     checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
+        #     print('checkpoint_dir', checkpoint_dir)
+        #
+        #     latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
+        #     print("Model", n, "loading checkpoint", latest_checkpoint)
+        #     self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
+        #     self.models_dict[n]["predictor_model"].eval()
+
 
 
     def ros_callback(self, msg):
