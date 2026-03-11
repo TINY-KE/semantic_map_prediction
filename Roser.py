@@ -30,6 +30,7 @@ import message_filters
 # from nav_msgs.msg import OccupancyGrid
 # from geometry_msgs.msg import PoseStamped
 from StepEgoMapPose_msgs.msg import StepEgoMapPose
+from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 
 class RosTester(object):
     """ Implements testing for prediction models
@@ -77,8 +78,11 @@ class RosTester(object):
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
                           spatial_labels=self.spatial_labels, object_labels=self.object_labels)
 
-        # 5. ROS 订阅
+
+        # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
+        self.goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=1)
+
         # grid_sub = message_filters.Subscriber("/ego_grid", OccupancyGrid)
         # pose_sub = message_filters.Subscriber("/robot_pose", PoseStamped)
         # # 同步器：slop 是允许的时间误差，单位秒
@@ -86,6 +90,9 @@ class RosTester(object):
         # ts.registerCallback(self.ros_sync_callback)
 
         self.num_flag = 0
+        self.prev_time = time.time()  # 初始化时间戳
+        self.fps = 0.0
+
 
     def ros_callback(self, msg):
         """处理自定义消息"""
@@ -102,7 +109,7 @@ class RosTester(object):
             self.run_online_inference()
 
     def run_online_inference(self):
-        print(f"\n\n ------------ {self.num_flag} 开始推理 -------------")
+        print(f"\n ------------  {self.num_flag} 开始推理 -------------")
         # 构造 Batch: [B=1, T=1, C=27, H=64, W=64]
         grid_seq = torch.stack(list(self.grid_buffer))  # [batch_size, 27, 64, 64]
         pose_seq = torch.stack(list(self.pose_buffer))  # [batch_size, 3]
@@ -111,10 +118,11 @@ class RosTester(object):
             'step_ego_grid_27': grid_seq.unsqueeze(0).to(self.device), # [1, batch_size, 27, 64, 64]
             'rel_pose': pose_seq.unsqueeze(0).to(self.device),        # [1, batch_size, 3]
             # 设置为全0张量，且保持与 pose_seq 相同的 batch 和 time 维度
-            'abs_pose': torch.zeros_like(pose_seq).unsqueeze(0).to(self.device)
+            # 'abs_pose': torch.zeros_like(pose_seq).unsqueeze(0).to(self.device)
         }
 
         # 1. 秒级时间戳（浮点数，含小数）
+        time0 = time.time()
         time1 = time.time()
         # print(f"当前秒级时间戳 1: {time.time()}")  # 输出示例：1773070000.123456
         # step_ego_grid_27 = batch['step_ego_grid_27']
@@ -132,8 +140,10 @@ class RosTester(object):
             # 平均预测
             # pred_maps_objects = torch.mean(ensemble_outs, dim=0)
             pred_maps_objects = ensemble_outs[0]
+            time2 = time.time()
+            print(f"                      推理耗时: {time2 - time1}")  # 输出示例：1773070000.123456
+            time1 = time2
             _rel_pose = batch['rel_pose'].squeeze(0)
-            _abs_poses = batch['abs_pose'].squeeze(0)
 
             # 计算不确定性地图
             # add crop uncertainty to uncertainty map  用于物体搜索的目标选择
@@ -144,6 +154,8 @@ class RosTester(object):
                 ensemble_class = ensemble_outs[:, :, :, i, :, :]
                 ensemble_class_var = torch.var(ensemble_class, dim=0, keepdim=True)
                 ensemble_var[:, :, :, i, :, :] = ensemble_class_var
+            # 方差的取值范围是 [0, 0.25]（概率∈[0,1] 时，方差理论最大值 = 0.25）；
+            # 因此你的 per_class_uncertainty_crop 最大值 M ≤ 0.25（实际中通常在 0~0.2 之间）。
             per_class_uncertainty = ensemble_var.squeeze(0)  # B x T x C x cH x cW
             step_uncertainty = self.sg.register_per_class_uncertainty_ros_without_rot(per_class_uncertainty_crop=per_class_uncertainty, pose=_rel_pose)
 
@@ -153,12 +165,34 @@ class RosTester(object):
             # Use cost map to decide next long term direction
             ltg = self.get_long_term_goal(self.sg, eucost_map)
             print(f" 发布探索点: {ltg[0,0,0]}, {ltg[0,0,1]}")
-            pose_coords_list = ltg.unsqueeze(1)
+            flag_pub_ltg = True
+            if flag_pub_ltg:
+                goal_x_idx = ltg[0, 0, 0].item()
+                goal_y_idx = ltg[0, 0, 1].item()
+                # 转换为物理坐标 (单位：米)
+                # 公式：物理位置 = (索引 * 分辨率) + 地图原点
+                # 注意：这里的物理 x/y 映射关系需与你的 SemanticGrid 定义一致
+                world_goal_x = goal_x_idx * self.cell_size + self.sg.origin[0]
+                world_goal_y = goal_y_idx * self.cell_size + self.sg.origin[1]
+                goal_msg = PoseStamped()
+                goal_msg.header.stamp = rospy.Time.now()
+                goal_msg.header.frame_id = "map"  # 或者是你 SLAM 的全局坐标系
+                goal_msg.pose.position.x = world_goal_x
+                goal_msg.pose.position.y = world_goal_y
+                goal_msg.pose.position.z = 0.0
+                goal_msg.pose.orientation.w = 1.0
+                self.goal_pub.publish(goal_msg)
+                print(
+                    f" [Ros-Goal] 发送导航点: 像素({goal_x_idx}, {goal_y_idx}) -> 物理({world_goal_x:.2f}, {world_goal_y:.2f})")
+            time2 = time.time()
+            print(f" [耗时]路径点规划耗时: {time2 - time1}")  # 输出示例：1773070000.123456
+            time1 = time2
 
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
-
-            print("   [Ros-Inference] Global map updated successfully.")
+            time2 = time.time()
+            print(f" [耗时]全局语义地图更新耗时: {time2 - time1}")  # 输出示例：1773070000.123456
+            time1 = time2
 
             # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
 
@@ -169,13 +203,16 @@ class RosTester(object):
                 if not os.path.exists(save_img_dir_):
                     os.makedirs(save_img_dir_)
                 # viz_utils.save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath=save_img_dir_, name='path')
-                # viz_utils.save_Global_forROS(step_geo_grid, savepath=save_img_dir_, name=f"global_semantic_{self.num_flag:03d}")
                 viz_utils.save_Global_forROS(step_geo_grid, step_uncertainty, savepath=save_img_dir_, name=f"global_{self.num_flag:03d}")
                 # viz_utils.save_uncertainty_ros(step_geo_grid, step_uncertainty, pose_coords_list.clone().cpu().numpy(), save_img_dir_, global_time=self.num_flag)
-                # viz_utils.save_ensembles(ensemble_object_maps, pred_maps_objects, save_img_dir_=save_img_dir_)
 
             time2 = time.time()
-            print(f" ------------ {self.num_flag} 推理耗时: {time2 - time1}")  # 输出示例：1773070000.123456
+            print(f" [耗时]全局: {time2 - time0}")  # 输出示例：1773070000.123456
+            curr_time = time.time()
+            dt = curr_time - self.prev_time
+            self.fps = 1.0 / dt if dt > 0 else 0.0
+            self.prev_time = curr_time
+            print(f" ------------ FPS: 【{self.fps:.2f}】 \n")
             self.num_flag = self.num_flag + 1
 
     def get_cost_map(self, sg, sem_lbl, a_1, a_2):

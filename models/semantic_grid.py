@@ -32,6 +32,10 @@ class SemanticGrid(object):
         self.uncertainty_map = torch.zeros((self.batch_size, 1, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32, device=self.device)
         self.per_class_uncertainty_map = torch.zeros((self.batch_size, self.object_labels, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32, device=self.device)
 
+        # 如果你的 grid_dim 是 (150, 150)，中心点在 (0,0) 处：
+        self.origin = [- (self.grid_dim[0] * self.cell_size) / 2,
+                          - (self.grid_dim[1] * self.cell_size) / 2]
+
     # Transform each ground-projected grid into geocentric coordinates
     def spatialTransformer(self, grid, pose, abs_pose):
         # Input: 

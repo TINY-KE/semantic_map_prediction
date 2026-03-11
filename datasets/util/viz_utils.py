@@ -1026,7 +1026,7 @@ def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, na
     global_uncertainty = global_map_uncertainty.detach().cpu()
     B, T, C, cH, cW = global_maps.shape
 
-    print(f"开始渲染并保存全局地图序列 (共 {T} 帧)...")
+    print(f"  开始渲染并保存全局地图序列 (共 {T} 帧)...")
 
     # 2. 预先创建 Figure 对象，避免在循环中重复创建
     #  修改 Figure 为 1x2 的布局
@@ -1047,6 +1047,16 @@ def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, na
         max_uncertainty, _ = torch.max(current_uncertainty, dim=0, keepdim=True)
         sigma_map = torch.sqrt(max_uncertainty).squeeze().numpy() # [H, W]
 
+        # ========== 关键添加：打印sigma_map的最大值（核心需求） ==========
+        flag_print = False
+        if flag_print:
+            sigma_max = sigma_map.max()  # 计算当前帧sigma_map的最大值
+            sigma_min = sigma_map.min()  # 可选：打印最小值，辅助分析
+            sigma_mean = sigma_map.mean()  # 可选：打印均值，辅助分析
+            # 格式化打印，清晰显示帧号和数值
+            print(
+                f" [不确定性地图] 📊 第 {t + 1}/{T} 帧 sigma_map - 最大值: {sigma_max:.4f}, 最小值: {sigma_min:.4f}, 均值: {sigma_mean:.4f}")
+
         # 2. 渲染两张子图
         axes[0].clear()
         axes[0].imshow(global_maps_objects_single)
@@ -1055,7 +1065,7 @@ def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, na
 
         axes[1].clear()
         # 使用 'jet' 或 'magma' 热力图显示不确定性，越亮代表越不确定
-        axes[1].imshow(sigma_map, vmin=0, vmax=1)
+        axes[1].imshow(sigma_map, vmin=0, vmax=0.7) #FIXME:  经过前面的print，可知最大值小于0.7
         axes[1].set_title("Uncertainty (Sigma)")
         axes[1].axis('off')
 
