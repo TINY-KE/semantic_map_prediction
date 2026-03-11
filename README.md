@@ -56,7 +56,7 @@ python main.py --name slam_2026_1_19 --ensemble_dir  path-model/smp   --log_dir 
 
 ## 749实验室
 + 使用ROS接收栅格地图
-  + python main.py --name slam_search_2_24.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs    --ensemble_size 1    --is_ros  --save_nav_images
+  + python main.py --name slam_search_3_12.1  --ensemble_dir  path-model/   --log_dir /home/robotlab/semantic-map-prediction/zhjd_logs    --ensemble_size 1    --is_ros  --save_nav_images
 + 完成ros发布
 + 接收地图和frontier
 + 

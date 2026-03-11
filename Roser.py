@@ -32,7 +32,8 @@ import message_filters
 from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 
-from frontier_utils.FrontierExtractor import FrontierExtractor
+from ros_utils.FrontierExtractor import FrontierExtractor
+from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncSemanticMarkerPublisher
 
 class RosTester(object):
     """ Implements testing for prediction models
@@ -45,9 +46,32 @@ class RosTester(object):
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # 0. 完整加载 Ensemble 模型逻辑
+        self.models_dict = {}  # keys are the ids of the models in the ensemble
+        ensemble_exp_rsmp = os.listdir(
+            self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
+        ensemble_exp_rsmp.sort()  # in case the models are numbered put them in order
+        for n in range(self.options.ensemble_size):
+            print("     [zhjd-slam-search] RosTester Init Loading model ", n)
+            self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
+            self.models_dict[n] = {k: v.to(self.device) for k, v in self.models_dict[n].items()}
+
+            # Needed only for models trained with multi-gpu setting
+            self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
+
+            checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
+            print('checkpoint_dir', checkpoint_dir)
+
+            latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
+            print("Model", n, "loading checkpoint", latest_checkpoint)
+            self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
+            self.models_dict[n]["predictor_model"].eval()
+
+
         # 1.边界和地图处理
         self.FrontierExtractor = FrontierExtractor()
-
+        self.semantic_map_publisher = AsyncSemanticMarkerPublisher(marker_topic="/semantic_global_map")
+        self.semantic_map_publisher_height = 3
 
         # 2. 状态缓冲区：T=10
         self.batch_size = 1
@@ -57,7 +81,8 @@ class RosTester(object):
         # 4. 初始化全局语义地图
         self.spatial_labels = 3
         self.object_labels = 27
-        self.grid_dim = (150, 150)  # 749办公室 7*12米
+        # self.grid_dim = (200, 200)  # 749办公室 7*12米
+        self.grid_dim = (200, 200)  # 749办公室 7*12米
         self.cell_size = 0.1
         self.crop_size = (64, 64)
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
@@ -66,38 +91,12 @@ class RosTester(object):
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
-        self.goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=1)
-
-        # grid_sub = message_filters.Subscriber("/ego_grid", OccupancyGrid)
-        # pose_sub = message_filters.Subscriber("/robot_pose", PoseStamped)
-        # # 同步器：slop 是允许的时间误差，单位秒
-        # ts = message_filters.ApproximateTimeSynchronizer([grid_sub, pose_sub], queue_size=10, slop=0.05)
-        # ts.registerCallback(self.ros_sync_callback)
+        self.goal_pub = rospy.Publisher('/move_base_simple/goal_sigma', PoseStamped, queue_size=1)
 
         self.num_flag = 0
         self.prev_time = time.time()  # 初始化时间戳
         self.fps = 0.0
 
-        # 6. 完整加载 Ensemble 模型逻辑
-        # self.models_dict = {}  # keys are the ids of the models in the ensemble
-        # ensemble_exp_rsmp = os.listdir(
-        #     self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
-        # ensemble_exp_rsmp.sort()  # in case the models are numbered put them in order
-        # for n in range(self.options.ensemble_size):
-        #     print("     [zhjd-slam-search] RosTester Init Loading model ", n)
-        #     self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
-        #     self.models_dict[n] = {k: v.to(self.device) for k, v in self.models_dict[n].items()}
-        #
-        #     # Needed only for models trained with multi-gpu setting
-        #     self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
-        #
-        #     checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
-        #     print('checkpoint_dir', checkpoint_dir)
-        #
-        #     latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
-        #     print("Model", n, "loading checkpoint", latest_checkpoint)
-        #     self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
-        #     self.models_dict[n]["predictor_model"].eval()
 
 
 
@@ -147,6 +146,7 @@ class RosTester(object):
             # 平均预测
             # pred_maps_objects = torch.mean(ensemble_outs, dim=0)
             pred_maps_objects = ensemble_outs[0]
+            # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
             time2 = time.time()
             print(f"                      推理耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
@@ -197,12 +197,35 @@ class RosTester(object):
 
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
+
+            flag_rviz_2dmap = True
+            if flag_rviz_2dmap:
+                # 计算cartographer地图的显示区域
+                carto_origin_x = self.FrontierExtractor._map_origin_x  # Cartographer地图原点x
+                carto_origin_y = self.FrontierExtractor._map_origin_y  # Cartographer地图原点y
+                carto_res = self.FrontierExtractor._map_resolution  # Cartographer地图分辨率（米/像素）
+                carto_pixel_w = self.FrontierExtractor._map_width  # Cartographer地图像素宽度
+                carto_pixel_h = self.FrontierExtractor._map_height  # Cartographer地图像素高度
+                # 计算Cartographer地图的物理范围（世界坐标）
+                carto_min_x = carto_origin_x  # 最小x（原点x）
+                carto_max_x = carto_origin_x + carto_pixel_w * carto_res  # 最大x（原点x + 宽度*分辨率）
+                carto_min_y = carto_origin_y  # 最小y（原点y）
+                carto_max_y = carto_origin_y + carto_pixel_h * carto_res  # 最大y（原点y + 高度*分辨率）
+                max_area = [carto_min_x, carto_max_x, carto_min_y, carto_max_y]
+                self.semantic_map_publisher.async_publish_semantic_map(
+                    step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
+                    res=0.1,
+                    origin_x=-self.grid_dim[0]*self.cell_size/2,
+                    origin_y=-self.grid_dim[1]*self.cell_size/2,
+                    height=self.semantic_map_publisher_height,
+                    max_area = max_area
+                )
+
             time2 = time.time()
             print(f" [耗时]全局语义地图更新耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
 
-            # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
-
+            # 保存地图
             if self.options.save_nav_images:
                 # save_img_dir_ = self.options.save_img_dir + '/ep_' + str(tstep)  + '/'
                 save_img_dir_ = f"{self.options.save_img_dir}/ros/1/"

@@ -221,3 +221,25 @@ class FrontierExtractor:
     def is_unknown_region(self, world_x: float, world_y: float) -> bool:
         """判断是否为未知区域"""
         return self.get_region_type(world_x, world_y) == self.REGION_UNKNOWN
+
+    # 在 FrontierExtractor 类中添加
+    def get_map_pixel_size(self):
+        """获取地图的像素尺寸（宽度、高度）"""
+        if self._map_width is None or self._map_height is None:
+            rospy.logwarn("地图数据未加载，无法获取像素尺寸")
+            return (0, 0)
+        return (self._map_width, self._map_height)
+
+    def get_map_resolution(self):
+        """获取地图分辨率（米/像素）"""
+        if self._map_resolution is None:
+            rospy.logwarn("地图数据未加载，无法获取分辨率")
+            return 0.0
+        return self._map_resolution
+
+    def get_map_origin(self):
+        """获取地图像素原点对应的世界坐标"""
+        if self._map_origin_x is None or self._map_origin_y is None:
+            rospy.logwarn("地图数据未加载，无法获取原点坐标")
+            return (0.0, 0.0)
+        return (self._map_origin_x, self._map_origin_y)
