@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 class SemanticGrid(object):
     
-    def __init__(self, batch_size, grid_dim, crop_size, cell_size, spatial_labels, object_labels):
+    def __init__(self, batch_size, grid_dim, crop_size, cell_size, spatial_labels, object_labels, origin = None):
         self.grid_dim = grid_dim
         self.cell_size = cell_size
         self.spatial_labels = spatial_labels
@@ -14,8 +14,19 @@ class SemanticGrid(object):
         self.batch_size = batch_size
         self.crop_size = crop_size
 
-        self.crop_start = int( (self.grid_dim[0] / 2) - (self.crop_size / 2) )
-        self.crop_end = int( (self.grid_dim[0] / 2) + (self.crop_size / 2) )
+        # self.crop_start = int( (self.grid_dim[0] / 2) - (self.crop_size / 2) )
+        # self.crop_end = int( (self.grid_dim[0] / 2) + (self.crop_size / 2) )
+
+        self.robot_origin_px_x = self.grid_dim[0] // 2
+        self.robot_origin_px_y = self.grid_dim[1] // 2
+
+        # X 轴切片范围: [268, 332]
+        self.crop_start_x = int(self.robot_origin_px_x - (self.crop_size / 2))
+        self.crop_end_x = int(self.robot_origin_px_x + (self.crop_size / 2))
+
+        # Y 轴切片范围: [28, 92] -> 之前报错就是因为这里误用了 268，而 268 超过了高度 120
+        self.crop_start_y = int(self.robot_origin_px_y - (self.crop_size / 2))
+        self.crop_end_y = int(self.robot_origin_px_y + (self.crop_size / 2))
 
         # self.device = torch.device('cpu')
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -33,8 +44,11 @@ class SemanticGrid(object):
         self.per_class_uncertainty_map = torch.zeros((self.batch_size, self.object_labels, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32, device=self.device)
 
         # 如果你的 grid_dim 是 (150, 150)，中心点在 (0,0) 处：
-        self.origin = [- (self.grid_dim[0] * self.cell_size) / 2,
-                          - (self.grid_dim[1] * self.cell_size) / 2]
+        if origin is None:
+            self.origin = [- (self.grid_dim[0] * self.cell_size) / 2,
+                              - (self.grid_dim[1] * self.cell_size) / 2]
+        else:
+            self.origin = origin
 
     # Transform each ground-projected grid into geocentric coordinates
     def spatialTransformer(self, grid, pose, abs_pose):

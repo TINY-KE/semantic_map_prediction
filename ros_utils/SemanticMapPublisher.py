@@ -131,7 +131,7 @@ class AsyncDualSemanticPublisher(SemanticMarkerPublisher):
                 rospy.logerr(f"Async Publish Error: {e}")
 
     def async_publish(self, ego_grid_sseg, free_mask=None, res=0.1, origin_x=-10.0, origin_y=-10.0, height=0.0,
-                      max_area=[-100, 100, -100, 100]):
+                      max_area=[-500, 500, -500, 500]):
         try:
             if self.publish_queue.full(): self.publish_queue.get_nowait()
             self.publish_queue.put_nowait((ego_grid_sseg, free_mask, res, origin_x, origin_y, height, max_area))

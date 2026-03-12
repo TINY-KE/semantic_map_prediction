@@ -75,15 +75,20 @@ class RosTester(object):
         self.grid_buffer = deque(maxlen=self.batch_size)
         self.pose_buffer = deque(maxlen=self.batch_size)
 
-        # 2. 初始化全局语义地图
+        # 2. 初始化全局语义地图[修改地图中心]
         self.spatial_labels = 3
         self.object_labels = 27
         # self.grid_dim = (200, 200)  # 749办公室 7*12米
-        self.grid_dim = (200, 200)  # 749办公室 7*12米
+        x_length_positive = 300
+        x_length_negative = 300
+        y_length_positive = 60
+        y_length_negative = 60
+
+        self.grid_dim = (x_length_positive+x_length_negative, y_length_positive+y_length_negative)  # 749办公室 7*12米
         self.cell_size = 0.1
         self.crop_size = (64, 64)
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
-                          spatial_labels=self.spatial_labels, object_labels=self.object_labels)
+                          spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None )
 
         # 3.边界和地图处理
         self.FrontierExtractor = FrontierExtractor(self.sg)
@@ -239,11 +244,13 @@ class RosTester(object):
                 max_area = [carto_min_x, carto_max_x, carto_min_y, carto_max_y]
                 self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
-                    free_mask= self.FrontierExtractor.target_free_mask,
+                    # free_mask= self.FrontierExtractor.target_free_mask,
+                    None,
                     res=0.1,
-                    origin_x=-self.grid_dim[0]*self.cell_size/2,
-                    origin_y=-self.grid_dim[1]*self.cell_size/2,
-                    height=self.semantic_map_publisher_height,
+                    origin_x=self.sg.origin[0],
+                    origin_y=self.sg.origin[1],
+                    height=self.semantic_map_publisher_height
+                    ,
                     max_area = max_area
                 )
 
