@@ -33,7 +33,7 @@ from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 
 from ros_utils.FrontierExtractor import FrontierExtractor
-from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncSemanticMarkerPublisher
+from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncDualSemanticPublisher
 
 class RosTester(object):
     """ Implements testing for prediction models
@@ -68,17 +68,14 @@ class RosTester(object):
             self.models_dict[n]["predictor_model"].eval()
 
 
-        # 1.边界和地图处理
-        self.FrontierExtractor = FrontierExtractor()
-        self.semantic_map_publisher = AsyncSemanticMarkerPublisher(marker_topic="/semantic_global_map")
-        self.semantic_map_publisher_height = 3
 
-        # 2. 状态缓冲区：T=10
+
+        # 1. 状态缓冲区：T=10
         self.batch_size = 1
         self.grid_buffer = deque(maxlen=self.batch_size)
         self.pose_buffer = deque(maxlen=self.batch_size)
 
-        # 4. 初始化全局语义地图
+        # 2. 初始化全局语义地图
         self.spatial_labels = 3
         self.object_labels = 27
         # self.grid_dim = (200, 200)  # 749办公室 7*12米
@@ -88,6 +85,10 @@ class RosTester(object):
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
                           spatial_labels=self.spatial_labels, object_labels=self.object_labels)
 
+        # 3.边界和地图处理
+        self.FrontierExtractor = FrontierExtractor(self.sg)
+        self.semantic_map_publisher = AsyncDualSemanticPublisher(raw_topic="/semantic_global_map", filtered_topic="/semantic_global_map_free_only")
+        self.semantic_map_publisher_height = 3
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
@@ -146,9 +147,9 @@ class RosTester(object):
             # 平均预测
             # pred_maps_objects = torch.mean(ensemble_outs, dim=0)
             pred_maps_objects = ensemble_outs[0]
-            # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
+
             time2 = time.time()
-            print(f"                      推理耗时: {time2 - time1}")  # 输出示例：1773070000.123456
+            print(f" [耗时]推理耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
             _rel_pose = batch['rel_pose'].squeeze(0)
 
@@ -169,36 +170,60 @@ class RosTester(object):
 
             # 选择长期目标
             eucost_map = self.get_Epistemic_Uncertainty_cost_map(self.sg)
-            # Use cost map to decide next long term direction
-            ltg = self.get_long_term_goal(self.sg, eucost_map)
-            print(f" 发布探索点: {ltg[0,0,0]}, {ltg[0,0,1]}")
-            flag_pub_ltg = True
-            if flag_pub_ltg:
-                goal_x_idx = ltg[0, 0, 0].item()
-                goal_y_idx = ltg[0, 0, 1].item()
-                # 转换为物理坐标 (单位：米)
-                # 公式：物理位置 = (索引 * 分辨率) + 地图原点
-                # 注意：这里的物理 x/y 映射关系需与你的 SemanticGrid 定义一致
-                world_goal_x = goal_x_idx * self.cell_size + self.sg.origin[0]
-                world_goal_y = goal_y_idx * self.cell_size + self.sg.origin[1]
-                goal_msg = PoseStamped()
-                goal_msg.header.stamp = rospy.Time.now()
-                goal_msg.header.frame_id = "map"  # 或者是你 SLAM 的全局坐标系
-                goal_msg.pose.position.x = world_goal_x
-                goal_msg.pose.position.y = world_goal_y
-                goal_msg.pose.position.z = 0.0
-                goal_msg.pose.orientation.w = 1.0
-                self.goal_pub.publish(goal_msg)
-                print(
-                    f" [Ros-Goal] 发送导航点: 像素({goal_x_idx}, {goal_y_idx}) -> 物理({world_goal_x:.2f}, {world_goal_y:.2f})")
+            robot_pose_world = pose_seq[0].cpu().numpy()
+            robot_x_px = int((robot_pose_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
+            robot_y_px = int((robot_pose_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
+            robot_pose_px = [robot_x_px, robot_y_px]
+            ltg = self.get_long_term_goal(eucost_map, robot_pose_px)
+            if ltg is not None:
+                print(f" 发布探索点(栅格坐标): {ltg[0]}, {ltg[1]}")
+                flag_pub_ltg = True
+                if flag_pub_ltg:
+                    goal_x_idx = ltg[0]
+                    goal_y_idx = ltg[1]
+                    # 转换为物理坐标 (单位：米)
+                    # 公式：物理位置 = (索引 * 分辨率) + 地图原点
+                    # 注意：这里的物理 x/y 映射关系需与你的 SemanticGrid 定义一致
+                    world_goal_x = goal_x_idx * self.cell_size + self.sg.origin[0]
+                    world_goal_y = goal_y_idx * self.cell_size + self.sg.origin[1]
+                    goal_msg = PoseStamped()
+                    goal_msg.header.stamp = rospy.Time.now()
+                    goal_msg.header.frame_id = "map"  # 或者是你 SLAM 的全局坐标系
+                    goal_msg.pose.position.x = world_goal_x
+                    goal_msg.pose.position.y = world_goal_y
+                    goal_msg.pose.position.z = 0.0
+                    goal_msg.pose.orientation.z = 1.0
+                    self.goal_pub.publish(goal_msg)
+                    print(
+                        f" [Ros-Goal] 发送导航点: 像素({goal_x_idx}, {goal_y_idx}) -> 物理({world_goal_x:.2f}, {world_goal_y:.2f})")
             time2 = time.time()
             print(f" [耗时]路径点规划耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
+
+            # 6.3 用墙来修正预测
+            step_ego_grid_27 = batch['step_ego_grid_27']
+            for t in range(T):
+                pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]  # [27,64,64]
+                pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]  # [27,64,64]
+                # 计算 bottom 层每个栅格的 argmax
+                val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+                # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+                fail_mask = (idx_bottom != 15)  # 只保留贝叶斯更新中的墙
+                # 3. 初始化最终的融合地图
+                # 我们先完整复制 bottom 的数据
+                fused_map = pred_maps_objects_bottom.clone()
+                # 4. 执行叠加逻辑：
+                # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+                # 这里使用广播机制处理 27 个通道
+                fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+                pred_maps_objects[0, t, :, :, :] = fused_map
+            # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
 
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
 
             flag_rviz_2dmap = True
+            # 在 run_online_inference 内部
             if flag_rviz_2dmap:
                 # 计算cartographer地图的显示区域
                 carto_origin_x = self.FrontierExtractor._map_origin_x  # Cartographer地图原点x
@@ -212,8 +237,9 @@ class RosTester(object):
                 carto_min_y = carto_origin_y  # 最小y（原点y）
                 carto_max_y = carto_origin_y + carto_pixel_h * carto_res  # 最大y（原点y + 高度*分辨率）
                 max_area = [carto_min_x, carto_max_x, carto_min_y, carto_max_y]
-                self.semantic_map_publisher.async_publish_semantic_map(
+                self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
+                    free_mask= self.FrontierExtractor.target_free_mask,
                     res=0.1,
                     origin_x=-self.grid_dim[0]*self.cell_size/2,
                     origin_y=-self.grid_dim[1]*self.cell_size/2,
@@ -232,8 +258,9 @@ class RosTester(object):
                 print("     [zhjd-ros] save_img_dir_: ", save_img_dir_)
                 if not os.path.exists(save_img_dir_):
                     os.makedirs(save_img_dir_)
-                # viz_utils.save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath=save_img_dir_, name='path')
+                viz_utils.save_all_infos_and_mapprediction_ros(batch, pred_maps_objects, savepath=save_img_dir_, name=f'path_{self.num_flag:03d}')
                 viz_utils.save_Global_forROS(step_geo_grid, step_uncertainty, savepath=save_img_dir_, name=f"global_{self.num_flag:03d}")
+                # viz_utils.save_free_mask
                 # viz_utils.save_uncertainty_ros(step_geo_grid, step_uncertainty, pose_coords_list.clone().cpu().numpy(), save_img_dir_, global_time=self.num_flag)
 
             time2 = time.time()
@@ -258,17 +285,137 @@ class RosTester(object):
         sigma_map = torch.sqrt(max_uncertainty)
         return sigma_map
 
-    def get_long_term_goal(self, sg, cost_map):
-        ### Choose long term goal
-        goal = torch.zeros((sg.per_class_uncertainty_map.shape[0], 1, 2), dtype=torch.int64, device=self.device)
-        # explored_grid = map_utils.get_explored_grid(sg.proj_grid)
-        # current_UNexplored_map = 1-explored_grid
-        # unexplored_cost_map = cost_map * current_UNexplored_map
-        # unexplored_cost_map = unexplored_cost_map.squeeze(1)
-        unexplored_cost_map = cost_map.squeeze(1)
-        for b in range(unexplored_cost_map.shape[0]):
-            map_ = unexplored_cost_map[b,:,:]
-            inds = utils.unravel_index(map_.argmax(), map_.shape)
-            goal[b,0,0] = inds[1]
-            goal[b,0,1] = inds[0]
-        return goal
+
+    # def get_long_term_goal(self, cost_map):
+    #     # 1. 预处理 cost_map，确保是 [H, W] 的 numpy 数组
+    #     # 假设 cost_map 维度是 [B, 1, H, W]
+    #     map_np = cost_map.detach().cpu().numpy()[0, :, :]
+    #
+    #     # 2. 获取已经对齐好的 free_mask [H, W]
+    #     # 确保它是布尔类型
+    #     free_mask = self.FrontierExtractor.target_free_mask
+    #     if free_mask is None:
+    #         rospy.logwarn("Free mask is None, returning zero goal")
+    #         return torch.zeros(2, dtype=torch.int64, device=self.device)
+    #
+    #     # 3. 使用 mask 过滤掉非空闲区域
+    #     # 将非空闲区域的分数设为极小值（比如 -1e9），这样 argmax 永远不会选到它们
+    #     masked_map = np.where(free_mask, map_np, -1e9)
+    #
+    #     # 4. 找到最大值的索引 (一维索引)
+    #     idx_1d = np.argmax(masked_map)
+    #     final_score = masked_map.flat[idx_1d]
+    #
+    #     # 5. 转换为二维像素坐标 [row_idx, col_idx]
+    #     # 注意：NumPy 的索引顺序通常是 (y, x) 对应 (row, col)
+    #     y_idx, x_idx = np.unravel_index(idx_1d, masked_map.shape)
+    #
+    #     # --- 输出调试信息 ---
+    #     if final_score < -1e8:
+    #         rospy.logwarn("警告：所有区域都被过滤，未找到有效的 Free 区域目标点！")
+    #     else:
+    #         print(f"目标点选择成功: 像素坐标({x_idx}, {y_idx}), 最终得分: {final_score:.4f}")
+    #
+    #     # 6. 返回目标点 [x_pixel, y_pixel]
+    #     # 这里的顺序要和你之前的 goal = [cell_j, cell_j] (推测你想写 [x, y]) 保持一致
+    #     if final_score > 0.63:
+    #         return torch.tensor([x_idx, y_idx], dtype=torch.int64, device=self.device)
+    #         # 否则，进入边界点 (Frontier) 评价模式
+    #     else:
+    #         # rospy.loginfo("--- [Mode: Frontier] 语义得分过低，转向评价边界点 ---")
+    #         frontiers = self.FrontierExtractor.get_latest_frontier_centroids()
+    #
+    #         if not frontiers:
+    #             rospy.logwarn("未发现任何边界点，返回None")
+    #             return None
+    #
+    #         best_frontier_score = -1e9
+    #         best_frontier_pixel = [x_idx, y_idx]  # 默认兜底
+    #
+    #         for f_world in frontiers:
+    #             # 将 World 坐标 (f_world[0], f_world[1]) 转换为 Target Map 的像素坐标
+    #             # 转换公式：(World - Origin) / Cell_Size
+    #             f_x_px = int(
+    #                 (f_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
+    #             f_y_px = int(
+    #                 (f_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
+    #
+    #             # 边界检查：确保点在 300x300 (或者你设定的 grid_dim) 范围内
+    #             if 0 <= f_x_px < self.grid_dim[0] and 0 <= f_y_px < self.grid_dim[1]:
+    #                 # 从 cost_map 中提取该边界点位置的分数
+    #                 f_score = map_np[f_y_px, f_x_px]
+    #
+    #                 if f_score > best_frontier_score:
+    #                     best_frontier_score = f_score
+    #                     best_frontier_pixel = [f_x_px, f_y_px]
+    #             else:
+    #                 # 如果边界点在 target_map 范围外，通常跳过
+    #                 continue
+    #
+    #         print(
+    #             f"--- [Mode: Frontier] 已选定最佳边界点: 像素({best_frontier_pixel[0]}, {best_frontier_pixel[1]}), 得分: {best_frontier_score:.4f} ---")
+    #         return torch.tensor(best_frontier_pixel, dtype=torch.int64, device=self.device)
+
+
+    # （1）将自由区间内score大于6.3的点，选出来，从中选择一个最近的点
+    # （2）如果没有大于6.3的点，则直接选择一个距离最近的frontier（即不考虑frontier的socre）
+    def get_long_term_goal(self, cost_map, robot_pose_px):
+        """
+        robot_pose_px: [x, y] 机器人当前的像素坐标
+        """
+        # 1. 预处理 cost_map [H, W]
+        map_np = cost_map.detach().cpu().numpy()[0, :, :]
+
+        # 2. 获取 Free Mask
+        free_mask = self.FrontierExtractor.target_free_mask
+        if free_mask is None:
+            rospy.logwarn("Free mask is None, returning None")
+            return None
+
+        # --- 策略 (1): 寻找自由区间内 Score > 0.63 的点中最近的一个 ---
+        # 找到所有满足条件的像素索引 (y_indices, x_indices)
+        high_score_mask = (map_np > 0.63) & (free_mask > 0)
+        y_high, x_high = np.where(high_score_mask)
+
+        if len(x_high) > 0:
+            # 计算这些高分点到机器人的距离
+            dists = np.sqrt((x_high - robot_pose_px[0]) ** 2 + (y_high - robot_pose_px[1]) ** 2)
+            nearest_idx = np.argmin(dists)
+
+            target_px = [x_high[nearest_idx], y_high[nearest_idx]]
+            print(
+                f"--- [Mode: 认知不确定性 High Score] 发现 {len(x_high)} 个目标，选择最近点: {target_px}, 距离: {dists[nearest_idx]:.2f} ---")
+            return torch.tensor(target_px, dtype=torch.int64, device=self.device)
+
+        # --- 策略 (2): 如果没有高分点，则选择距离最近的 Frontier ---
+        else:
+            rospy.loginfo("--- [Mode: 最近边界点] 无高分目标，寻找最近边界点 ---")
+            frontiers = self.FrontierExtractor.get_latest_frontier_centroids()
+
+            if not frontiers:
+                rospy.logwarn("未发现任何边界点，探索失败")
+                return None
+
+            best_f_px = None
+            min_f_dist = float('inf')
+
+            for f_world in frontiers:
+                # World -> Pixel
+                f_x_px = int(
+                    (f_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
+                f_y_px = int(
+                    (f_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
+
+                # 边界检查
+                if 0 <= f_x_px < self.grid_dim[0] and 0 <= f_y_px < self.grid_dim[1]:
+                    # 计算到机器人的像素距离
+                    dist = np.sqrt((f_x_px - robot_pose_px[0]) ** 2 + (f_y_px - robot_pose_px[1]) ** 2)
+                    if dist < min_f_dist:
+                        min_f_dist = dist
+                        best_f_px = [f_x_px, f_y_px]
+
+            if best_f_px is not None:
+                print(f"--- [Mode: Nearest Frontier] 已选定最近边界点: {best_f_px}, 距离: {min_f_dist:.2f} ---")
+                return torch.tensor(best_f_px, dtype=torch.int64, device=self.device)
+            else:
+                return None

@@ -11,8 +11,6 @@ from sklearn.cluster import KMeans
 from sklearn.cluster import DBSCAN
 
 from models.semantic_grid import SemanticGrid
-import matplotlib.pyplot as plt
-import os
 
 class FrontierExtractor:
     """ROS地图边界提取器类（带高效区域查询API）"""
@@ -63,14 +61,14 @@ class FrontierExtractor:
         self._map_origin_y = None
         self._map_width = None
         self._map_height = None
-        self._latest_centroids_in_world = []  # 存储最新边界中心点
+        self._latest_centroids = []  # 存储最新边界中心点
 
         self.FREE_THRESHOLD = 50
         self.OCCUPIED_THRESHOLD = 80
 
         # 目标转换地图的参数
-        self.target_origin_x = -sg.grid_dim[0] * sg.cell_size / 2.0
-        self.target_origin_y = -sg.grid_dim[1] * sg.cell_size / 2.0
+        self.target_origin_x = 0
+        self.target_origin_y = 0
         self.target_cell_size = sg.cell_size
         self.target_width = sg.grid_dim[0]
         self.target_height = sg.grid_dim[1]
@@ -113,7 +111,7 @@ class FrontierExtractor:
             final_centroids = self._merge_close_centroids(centroids)
             # final_centroids = centroids
 
-            self._latest_centroids_in_world = final_centroids
+            self._latest_centroids = final_centroids
             self._publish_frontier_markers(final_centroids, msg.header.frame_id)
 
             self.target_free_mask = self.get_target_free_mask()
@@ -193,7 +191,7 @@ class FrontierExtractor:
     # ==================== 对外提供的核心API ====================
     def get_latest_frontier_centroids(self):
         """获取最新的边界中心点列表（返回副本，避免外部修改）"""
-        return [list(centroid) for centroid in self._latest_centroids_in_world]
+        return [list(centroid) for centroid in self._latest_centroids]
 
     def get_region_type(self, world_x: float, world_y: float) -> int:
         """查询世界坐标的区域类型"""
@@ -308,38 +306,3 @@ class FrontierExtractor:
             target_mask[np.ix_(valid_y_idx, valid_x_idx)] = sampled_free
 
         return target_mask
-
-
-
-    def save_free_mask_plot(free_mask, save_path="free_mask_debug.png"):
-        """
-        将 free_mask 绘制并保存
-        :param free_mask: numpy.ndarray [H, W], 布尔类型或 0/1
-        :param save_path: 保存路径
-        """
-        if free_mask is None:
-            print("Error: free_mask 为空，无法保存。")
-            return
-
-        # 1. 转换数据类型（如果是布尔型转为 0/1 以便绘图）
-        plot_data = free_mask.astype(np.float32)
-
-        # 2. 创建画布
-        plt.figure(figsize=(8, 8))
-
-        # 3. 绘图 (使用 gray 颜色映射，1为白，0为黑)
-        # origin='lower' 确保坐标系与 ROS 地图一致（左下角为原点）
-        plt.imshow(plot_data, cmap='gray', origin='lower')
-
-        plt.title("Target Free Mask (White=Free, Black=Occupied/Unknown)")
-        plt.colorbar(label="Free Probability")
-
-        # 4. 自动创建目录
-        save_dir = os.path.dirname(save_path)
-        if save_dir and not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        # 5. 保存并关闭
-        plt.savefig(save_path)
-        plt.close()
-        print(f"Free Mask 已保存至: {save_path}")

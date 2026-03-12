@@ -601,7 +601,7 @@ def color_and_extract(grid, color_mapping):
     colorized_border = add_border(colorized, color=(10, 10, 10), thickness=1)
     return colorized_border
 
-def show_image_color_and_extract(tensor_or_array, title="image", color_mapping=27):
+def show_image_color_and_extract(tensor_or_array, title="image", color_mapping=27, duration=0.1):
     if isinstance(tensor_or_array, torch.Tensor):
         img = tensor_or_array.detach().cpu().numpy()
     else:
@@ -610,7 +610,11 @@ def show_image_color_and_extract(tensor_or_array, title="image", color_mapping=2
     plt.imshow(img)
     plt.title(title)
     plt.axis('off')
-    plt.show()
+    # plt.show()
+    # --- 设置显示时长逻辑 ---
+    plt.draw()  # 渲染图像
+    plt.pause(duration)  # 暂停指定秒数（期间会处理 GUI 事件，窗口可见）
+    plt.close()  # 关闭当前窗口
 
 def show_image(tensor_or_array, title="image"):
     if isinstance(tensor_or_array, torch.Tensor):
@@ -823,9 +827,9 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
 
         imgs = [
             (images_single, "RGB Image", None),
-            (ssegs_single, "GT Segmentation", 'tab20'),
+            (ssegs_single, "Segmentation", 'tab20'),
             (depth_imgs_single, "Depth", 'viridis'),
-            (step_ego_grid_27_single, "RGB Project", None),
+            (step_ego_grid_27_single, "ego_grid_27", None),
             (pred_maps_objects_single, "Refined Semantic Map", None),
         ]
 
@@ -842,6 +846,73 @@ def save_all_infos_and_mapprediction_slam(batch, pred_maps_objects, savepath, na
         plt.close()
         print(f"✅ 已保存: {save_file}")
 
+def save_all_infos_and_mapprediction_ros(batch, pred_maps_objects, savepath, name):
+    # batch: ['abs_pose', 'ego_grid_crops_spatial', 'step_ego_grid_crops_spatial', 'gt_grid_crops_spatial', 'gt_grid_crops_objects', 'images', 'ssegs', 'depth_imgs', 'pred_ego_crops_sseg', 'step_ego_grid_27']
+    step_ego_grid_27 = batch['step_ego_grid_27']
+
+
+
+    B, T, _, cH, cW = step_ego_grid_27.shape
+    for t in range(T):
+
+        step_ego_grid_27_single = colorEncode(step_ego_grid_27[0, t, :, :, :].argmax(axis=0))
+
+        # 是否将预测图叠加到step_ego_grid_27上
+        flag_map_overlay = 0
+        if flag_map_overlay == 0:
+            pred_maps_objects_single = colorEncode(pred_maps_objects[0, t, :, :, :].argmax(axis=0))
+        elif flag_map_overlay == 1:
+            pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]      # [27,64,64]
+            pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]        # [27,64,64]
+            # 计算 bottom 层每个栅格的 argmax
+            val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+            # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+            fail_mask = (idx_bottom == 0) | (idx_bottom == 17)
+            # 3. 初始化最终的融合地图
+            # 我们先完整复制 bottom 的数据
+            fused_map = pred_maps_objects_bottom.clone()
+            # 4. 执行叠加逻辑：
+            # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+            # 这里使用广播机制处理 27 个通道
+            fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+            pred_maps_objects_single = colorEncode(fused_map.argmax(axis=0))
+        elif flag_map_overlay == 2:
+            pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]      # [27,64,64]
+            pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]        # [27,64,64]
+            # 计算 bottom 层每个栅格的 argmax
+            val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+            # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+            fail_mask = (idx_bottom != 15) # 只保留贝叶斯更新中的墙
+            # 3. 初始化最终的融合地图
+            # 我们先完整复制 bottom 的数据
+            fused_map = pred_maps_objects_bottom.clone()
+            # 4. 执行叠加逻辑：
+            # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+            # 这里使用广播机制处理 27 个通道
+            fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+            pred_maps_objects_single = colorEncode(fused_map.argmax(axis=0))
+
+        # === 六宫格保存本地===
+        fig, axs = plt.subplots(1, 2, figsize=(30, 30))
+        axs = axs.flatten()
+
+        imgs = [
+            (step_ego_grid_27_single, "ego_grid_27", None),
+            (pred_maps_objects_single, "Refined Semantic Map", None),
+        ]
+
+        for i, (img, title, cmap) in enumerate(imgs):
+            axs[i].imshow(img, cmap=cmap)
+            axs[i].set_title(title)
+            axs[i].axis('off')
+
+        plt.tight_layout()
+
+        # === 保存图片 ===
+        save_file = os.path.join(savepath, f"{name}.png")
+        plt.savefig(save_file, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
+        print(f"✅ 已保存: {save_file}")
 
 
 def save_all_infos_and_mapprediction_Global(batch, local_pred_maps_objects, global_maps_objects, savepath, name):
@@ -1065,7 +1136,7 @@ def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, na
 
         axes[1].clear()
         # 使用 'jet' 或 'magma' 热力图显示不确定性，越亮代表越不确定
-        axes[1].imshow(sigma_map, vmin=0, vmax=0.7) #FIXME:  经过前面的print，可知最大值小于0.7
+        axes[1].imshow(sigma_map, vmin=0, vmax=0.8) #FIXME:  经过前面的print，可知最大值小于0.7。但根据数学计算  最大值约为0.8112
         axes[1].set_title("Uncertainty (Sigma)")
         axes[1].axis('off')
 
