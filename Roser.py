@@ -90,12 +90,13 @@ class RosTester(object):
         self.cell_size = 0.1
         self.crop_size = (64, 64)
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
-                          spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None )
+                          spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
+                          recovered_map_path =  "/home/robotlab/Downloads/global_map/combined_image5.png")
 
         # 3.边界和地图处理
         self.FrontierExtractor = FrontierExtractor(self.sg)
         self.semantic_map_publisher = AsyncDualSemanticPublisher(raw_topic="/semantic_global_map", filtered_topic="/semantic_global_map_free_only")
-        self.semantic_map_publisher_height = 3
+        self.semantic_map_publisher_height = 6
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
@@ -233,7 +234,7 @@ class RosTester(object):
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
 
-            flag_rviz_2dmap = False
+            flag_rviz_2dmap = True
             # 在 run_online_inference 内部
             if flag_rviz_2dmap:
                 # 计算cartographer地图的显示区域
@@ -250,14 +251,14 @@ class RosTester(object):
                 max_area = [carto_min_x, carto_max_x, carto_min_y, carto_max_y]
                 self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
-                    # free_mask= self.FrontierExtractor.target_free_mask,
-                    None,
+                    free_mask= self.FrontierExtractor.target_free_mask,
+                    # None,
                     res=0.1,
                     origin_x=self.sg.origin[0],
                     origin_y=self.sg.origin[1],
                     height=self.semantic_map_publisher_height
-                    # ,
-                    # max_area = max_area
+                    ,
+                    max_area = max_area
                 )
 
             time2 = time.time()

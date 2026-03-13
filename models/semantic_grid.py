@@ -2,11 +2,15 @@
 import numpy as np 
 import torch
 import torch.nn.functional as F
-
+import os
+import sys
+# 确保项目根目录在 sys.path 中
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import datasets.util.viz_utils as viz_utils
 
 class SemanticGrid(object):
     
-    def __init__(self, batch_size, grid_dim, crop_size, cell_size, spatial_labels, object_labels, origin = None):
+    def __init__(self, batch_size, grid_dim, crop_size, cell_size, spatial_labels, object_labels, origin = None, recovered_map_path=None):
         self.grid_dim = grid_dim
         self.cell_size = cell_size
         self.spatial_labels = spatial_labels
@@ -49,6 +53,25 @@ class SemanticGrid(object):
                               - (self.grid_dim[0] * self.cell_size) / 2]
         else:
             self.origin = origin
+
+        # ==========================================
+        # 初始化 本地存储的 recovered_global_map_tensor
+        # ==========================================
+        if recovered_map_path is not None and os.path.exists(recovered_map_path):
+            print(f"[SemanticGrid] 正在从本地加载先验语义地图: {recovered_map_path}")
+            # 加载并放到正确的 device (cuda/cpu) 上
+            self.recovered_global_map_tensor = viz_utils.load_Global_fromROS(
+                recovered_map_path,
+                color_mapping=viz_utils.color_mapping_27
+            ).to(self.device)
+            # 直接覆盖 self.sem_grid
+            self.sem_grid = self.recovered_global_map_tensor
+        else:
+            if recovered_map_path is not None:
+                print(f"[SemanticGrid] 警告: 未找到指定的地图文件 {recovered_map_path}")
+            # 初始化为空，方便后续代码通过 if self.recovered_global_map_tensor is not None 判断
+            self.recovered_global_map_tensor = None
+
 
     # Transform each ground-projected grid into geocentric coordinates
     def spatialTransformer(self, grid, pose, abs_pose):
@@ -361,14 +384,18 @@ class SemanticGrid(object):
         return geo_grid_out
 
     def register_sem_pred_ros_without_rot(self, prediction_crop, pose):
-        B, T, C, cH, cW = prediction_crop.shape
-        # L2M原版：初始值设为 1 / C
-        ego_pred_map = torch.zeros((T, C, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32,
-                                  device=self.device) * (1 / C)
-        # # ZHJD版：初始值设为0
-        ego_pred_map[:, :, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = prediction_crop.squeeze(0)
-        # 进行位姿变换（局部 → 全局）
-        geo_pred_map = self.spatialTransformer_ros_without_rot(grid=ego_pred_map, pose=pose)
+        if self.recovered_global_map_tensor is not None:
+            B, T, C, cH, cW = prediction_crop.shape
+            # L2M原版：初始值设为 1 / C
+            ego_pred_map = torch.zeros((T, C, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32,
+                                      device=self.device) * (1 / C)
+            # # ZHJD版：初始值设为0
+            ego_pred_map[:, :, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = prediction_crop.squeeze(0)
+            # 进行位姿变换（局部 → 全局）
+            geo_pred_map = self.spatialTransformer_ros_without_rot(grid=ego_pred_map, pose=pose)
 
-        return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
-        # return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+            return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+            # return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+
+        else:
+            return self.recovered_global_map_tensor

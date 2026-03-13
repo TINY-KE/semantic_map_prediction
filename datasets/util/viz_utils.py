@@ -1264,3 +1264,86 @@ def colorize_sseg(sseg, color_map):
         color_image[mask] = color
 
     return color_image
+
+
+def load_Global_fromROS(image_path, color_mapping=color_mapping_27):
+    """
+    读取本地的 RGB 图像，并还原为 [1, 1, 27, H, W] 的语义地图 Tensor。
+
+    参数:
+        image_path: 本地 png 图像路径
+        color_mapping: 颜色映射字典，默认为 color_mapping_27
+
+    返回:
+        global_maps_objects: 形状为 [1, 1, 27, H, W] 的 FloatTensor
+    """
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"找不到图像文件: {image_path}")
+
+    # 1. 使用 OpenCV 读取图像 (默认 BGR 格式)
+    img_bgr = cv2.imread(image_path)
+    if img_bgr is None:
+        raise ValueError(f"无法读取图像文件，请检查文件是否损坏: {image_path}")
+
+    # 2. 转换为 RGB 格式
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    H, W, _ = img_rgb.shape
+
+    # 3. 创建 2D 标签图 (初始化为 0，即 void 类别)
+    label_map = np.zeros((H, W), dtype=np.int64)
+    # 3. 创建 2D 标签图
+    label_map = np.zeros((H, W), dtype=np.int64)
+
+    # --- 新增：颜色偏差处理逻辑 ---
+    # 定义允许的最大颜色偏差距离（在 0-255 范围内）
+    color_threshold = 15.0
+
+    # 为了效率，我们先预处理一下 mapping
+    ids = []
+    colors = []
+    for label_id, color in color_mapping.items():
+        ids.append(label_id)
+        colors.append(color)
+
+    target_colors = np.array(colors)  # [NumClasses, 3]
+
+    # 展平图像像素以便批量计算 [H*W, 3]
+    flat_img = img_rgb.reshape(-1, 3).astype(np.float32)
+
+    # 遍历每个类别（如果类别不多，这样比逐像素计算快）
+    for i, target_color in enumerate(target_colors):
+        # 计算当前图像所有像素与该类标颜色的欧氏距离
+        dist = np.linalg.norm(flat_img - target_color, axis=1)
+
+        # 将距离小于阈值的像素标记为该 label_id
+        mask = (dist <= color_threshold)
+
+        # 恢复成 2D 形状并赋值
+        label_map[mask.reshape(H, W)] = ids[i]
+
+    # 注意：在保存图像时，你在 color_and_extract 内部调用了 add_border 添加了 (10, 10, 10) 的边框。
+    # 因为 (10, 10, 10) 不在 color_mapping_27 中，所以它会自动回退为我们在步骤 3 初始化的 0 (void 类别)。
+
+    # 5. 将 2D 标签图转为 27 通道的 One-Hot 张量 [27, H, W]
+    # 我们创建一个由 0.0 组成的浮点数组
+    num_classes = 27
+    grid = np.zeros((num_classes, H, W), dtype=np.float32)
+
+    for c in range(num_classes):
+        # 如果当前像素属于类别 c，对应通道设为 1.0
+        grid[c, :, :] = (label_map == c).astype(np.float32)
+
+    # # 6. 扩充维度到 [1, 1, 27, H, W]
+    # # np.expand_dims 可以在指定轴前增加维度
+    # grid_5d = np.expand_dims(grid, axis=(0, 1))
+
+    # 6. 扩充维度到 [1, 1, 27, H, W]
+    # np.expand_dims 可以在指定轴前增加维度
+    grid_5d = np.expand_dims(grid, axis=0)
+
+    # 7. 转为 PyTorch Tensor
+    global_maps_objects = torch.from_numpy(grid_5d)
+
+    print(f"✅ 已成功从图片恢复全局语义地图，形状: {global_maps_objects.shape}")
+
+    return global_maps_objects
