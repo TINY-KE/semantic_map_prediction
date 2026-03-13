@@ -28,9 +28,10 @@ from collections import deque
 import rospy
 import message_filters
 # from nav_msgs.msg import OccupancyGrid
-# from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Point
 from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
+from visualization_msgs.msg import Marker
 
 from ros_utils.FrontierExtractor import FrontierExtractor
 from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncDualSemanticPublisher, AsyncUncertaintyMarkerPublisher
@@ -109,6 +110,8 @@ class RosTester(object):
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
         self.goal_pub = rospy.Publisher('/move_base_simple/goal_sigma', PoseStamped, queue_size=1)
+        self.potential_points_pub = rospy.Publisher('/potential_exploration_points', Marker, queue_size=1)
+
 
         self.num_flag = 0
         self.prev_time = time.time()  # 初始化时间戳
@@ -198,7 +201,7 @@ class RosTester(object):
             step_uncertainty = self.sg.register_per_class_uncertainty_ros_without_rot(per_class_uncertainty_crop=per_class_uncertainty, pose=_rel_pose)
 
 
-            # 选择长期目标
+            # # 选择长期目标
             eucost_map = self.get_Epistemic_Uncertainty_cost_map(self.sg)
             robot_pose_world = pose_seq[0].cpu().numpy()
             robot_x_px = int((robot_pose_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
@@ -287,7 +290,8 @@ class RosTester(object):
                     origin_y=self.sg.origin[1],
                     height=self.uncertainty_map_publisher_height,
                     max_area=max_area,
-                    threshold=0
+                    threshold=0,
+                    robot_pose_px = robot_pose_px
                 )
 
             time2 = time.time()
@@ -332,81 +336,160 @@ class RosTester(object):
         sigma_map = torch.sqrt(max_uncertainty)
         return sigma_map
 
+    def publish_potential_points_marker(self, pts_px):
+        """
+        pts_px: 像素坐标列表 [[x1, y1], [x2, y2], ...]
+        """
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = "potential_points"
+        marker.id = 0
+        marker.type = Marker.SPHERE_LIST
+        marker.action = Marker.ADD
 
-    # def get_long_term_goal(self, cost_map):
-    #     # 1. 预处理 cost_map，确保是 [H, W] 的 numpy 数组
-    #     # 假设 cost_map 维度是 [B, 1, H, W]
-    #     map_np = cost_map.detach().cpu().numpy()[0, :, :]
-    #
-    #     # 2. 获取已经对齐好的 free_mask [H, W]
-    #     # 确保它是布尔类型
-    #     free_mask = self.FrontierExtractor.target_free_mask
-    #     if free_mask is None:
-    #         rospy.logwarn("Free mask is None, returning zero goal")
-    #         return torch.zeros(2, dtype=torch.int64, device=self.device)
-    #
-    #     # 3. 使用 mask 过滤掉非空闲区域
-    #     # 将非空闲区域的分数设为极小值（比如 -1e9），这样 argmax 永远不会选到它们
-    #     masked_map = np.where(free_mask, map_np, -1e9)
-    #
-    #     # 4. 找到最大值的索引 (一维索引)
-    #     idx_1d = np.argmax(masked_map)
-    #     final_score = masked_map.flat[idx_1d]
-    #
-    #     # 5. 转换为二维像素坐标 [row_idx, col_idx]
-    #     # 注意：NumPy 的索引顺序通常是 (y, x) 对应 (row, col)
-    #     y_idx, x_idx = np.unravel_index(idx_1d, masked_map.shape)
-    #
-    #     # --- 输出调试信息 ---
-    #     if final_score < -1e8:
-    #         rospy.logwarn("警告：所有区域都被过滤，未找到有效的 Free 区域目标点！")
-    #     else:
-    #         print(f"目标点选择成功: 像素坐标({x_idx}, {y_idx}), 最终得分: {final_score:.4f}")
-    #
-    #     # 6. 返回目标点 [x_pixel, y_pixel]
-    #     # 这里的顺序要和你之前的 goal = [cell_j, cell_j] (推测你想写 [x, y]) 保持一致
-    #     if final_score > 0.63:
-    #         return torch.tensor([x_idx, y_idx], dtype=torch.int64, device=self.device)
-    #         # 否则，进入边界点 (Frontier) 评价模式
-    #     else:
-    #         # rospy.loginfo("--- [Mode: Frontier] 语义得分过低，转向评价边界点 ---")
-    #         frontiers = self.FrontierExtractor.get_latest_frontier_centroids()
-    #
-    #         if not frontiers:
-    #             rospy.logwarn("未发现任何边界点，返回None")
-    #             return None
-    #
-    #         best_frontier_score = -1e9
-    #         best_frontier_pixel = [x_idx, y_idx]  # 默认兜底
-    #
-    #         for f_world in frontiers:
-    #             # 将 World 坐标 (f_world[0], f_world[1]) 转换为 Target Map 的像素坐标
-    #             # 转换公式：(World - Origin) / Cell_Size
-    #             f_x_px = int(
-    #                 (f_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
-    #             f_y_px = int(
-    #                 (f_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
-    #
-    #             # 边界检查：确保点在 300x300 (或者你设定的 grid_dim) 范围内
-    #             if 0 <= f_x_px < self.grid_dim[0] and 0 <= f_y_px < self.grid_dim[1]:
-    #                 # 从 cost_map 中提取该边界点位置的分数
-    #                 f_score = map_np[f_y_px, f_x_px]
-    #
-    #                 if f_score > best_frontier_score:
-    #                     best_frontier_score = f_score
-    #                     best_frontier_pixel = [f_x_px, f_y_px]
-    #             else:
-    #                 # 如果边界点在 target_map 范围外，通常跳过
-    #                 continue
-    #
-    #         print(
-    #             f"--- [Mode: Frontier] 已选定最佳边界点: 像素({best_frontier_pixel[0]}, {best_frontier_pixel[1]}), 得分: {best_frontier_score:.4f} ---")
-    #         return torch.tensor(best_frontier_pixel, dtype=torch.int64, device=self.device)
+        # 尺寸：直径 0.35 米的球体，稍微大一点点更显眼
+        marker.scale.x = 0.3
+        marker.scale.y = 0.3
+        marker.scale.z = 0.3
+
+        # 颜色：粉色 (R: 1.0, G: 0.0, B: 1.0)
+        marker.color.r = 1.0
+        marker.color.g = 0.08  # 稍微带一点点暖色调的深粉
+        marker.color.b = 0.58
+        marker.color.a = 1  # 提高不透明度，让它更跳脱
+
+        for pt in pts_px:
+            # 像素坐标 -> 物理世界坐标
+            world_x = pt[0] * self.cell_size + self.sg.origin[0]
+            world_y = pt[1] * self.cell_size + self.sg.origin[1]
+
+            p = Point()
+            p.x = world_x
+            p.y = world_y
+            p.z = self.uncertainty_map_publisher_height + 0.12
+            marker.points.append(p)
+
+        self.potential_points_pub.publish(marker)
+
+
+
 
 
     # （1）将自由区间内score大于6.3的点，选出来，从中选择一个最近的点
     # （2）如果没有大于6.3的点，则直接选择一个距离最近的frontier（即不考虑frontier的socre）
     def get_long_term_goal(self, cost_map, robot_pose_px):
+        """
+        robot_pose_px: [x, y] 机器人当前的像素坐标 (Grid Coordinates)
+        cost_map: 认知不确定性地图 (Sigma Map)
+        """
+        # 1. 预处理 cost_map 转换为 [H, W] 的 numpy 数组
+        map_np = cost_map.detach().cpu().numpy()
+        if map_np.ndim == 3:
+            map_np = map_np[0, :, :]
+        elif map_np.ndim == 4:
+            map_np = map_np[0, 0, :, :]
+
+        # 2. 获取并检查 Free Mask
+        free_mask = self.FrontierExtractor.target_free_mask
+        if free_mask is None:
+            rospy.logwarn("--- [LTG] Free mask is None, skipping goal selection ---")
+            return None
+
+        # 维度对齐检查
+        if map_np.shape != free_mask.shape:
+            if map_np.shape == free_mask.T.shape:
+                free_mask = free_mask.T
+            else:
+                rospy.logerr(f"--- [LTG] Shape mismatch: Map {map_np.shape}, Mask {free_mask.shape} ---")
+                return None
+
+        # ==========================================================
+        # 新增：距离过滤逻辑 (只在机器人附近选择)
+        # ==========================================================
+        H, W = map_np.shape
+        # 定义搜索半径 (例如：10米 = 10 / 0.1 = 100 像素)
+        search_radius_m = 5.0
+        search_radius_px = int(search_radius_m / self.cell_size)
+
+        # 创建网格索引
+        Y, X = np.ogrid[:H, :W]
+        # 计算每个点到机器人像素位置的平方距离 (避免开方以提高速度)
+        dist_sq = (X - robot_pose_px[0]) ** 2 + (Y - robot_pose_px[1]) ** 2
+        # 生成圆形距离掩码
+        distance_mask = dist_sq <= search_radius_px ** 2
+
+        # ==========================================================
+        # 策略 (1): 可视化逻辑 - 寻找附近的 Top 4 潜力点
+        # ==========================================================
+        # 复合过滤：必须在 Free 区域 且 在机器人附近
+        nearby_free_mask = (free_mask > 0) & distance_mask
+        y_free, x_free = np.where(nearby_free_mask)
+
+        if len(x_free) > 0:
+            free_scores = map_np[y_free, x_free]
+            sorted_indices = np.argsort(free_scores)[::-1]
+
+            potential_pts = []
+            for idx in sorted_indices:
+                pt = [x_free[idx], y_free[idx]]
+                if all(np.linalg.norm(np.array(pt) - np.array(prev_pt)) > 10 for prev_pt in potential_pts):
+                    potential_pts.append(pt)
+                if len(potential_pts) >= 4:
+                    break
+            self.publish_potential_points_marker(potential_pts)
+
+        # ==========================================================
+        # 策略 (2): 导航决策逻辑 - 附近的高分点 (> 0.63)
+        # ==========================================================
+        # 复合过滤：高分 且 Free 且 附近
+        nearby_high_score_mask = (map_np > 0.63) & (free_mask > 0) & distance_mask
+        y_high, x_high = np.where(nearby_high_score_mask)
+
+        if len(x_high) > 0:
+            # 在附近的候选点中选最近的
+            dists = np.sqrt((x_high - robot_pose_px[0]) ** 2 + (y_high - robot_pose_px[1]) ** 2)
+            nearest_idx = np.argmin(dists)
+
+            target_px = [x_high[nearest_idx], y_high[nearest_idx]]
+            print(f"--- [Mode: 认知不确定性] 附近(半径{search_radius_m}m)发现目标: {target_px} ---")
+            return torch.tensor(target_px, dtype=torch.int64, device=self.device)
+
+        # ==========================================================
+        # 策略 (3): 兜底逻辑 - 附近没有高分，选最近边界点 (Frontier)
+        # ==========================================================
+        else:
+            rospy.loginfo("--- [Mode: 边界探索] 半径内无高分，寻找边界点 ---")
+            frontiers = self.FrontierExtractor.get_latest_frontier_centroids()
+
+            if not frontiers:
+                return None
+
+            best_f_px = None
+            min_f_dist = float('inf')
+
+            for f_world in frontiers:
+                f_x_px = int(
+                    (f_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
+                f_y_px = int(
+                    (f_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
+
+                if 0 <= f_x_px < W and 0 <= f_y_px < H:
+                    dist = np.sqrt((f_x_px - robot_pose_px[0]) ** 2 + (f_y_px - robot_pose_px[1]) ** 2)
+                    # 你可以选择是否也对 Frontier 进行半径限制
+                    # if dist > search_radius_px: continue
+
+                    if dist < min_f_dist:
+                        min_f_dist = dist
+                        best_f_px = [f_x_px, f_y_px]
+
+            if best_f_px is not None:
+                return torch.tensor(best_f_px, dtype=torch.int64, device=self.device)
+            else:
+                return None
+
+
+    def get_long_term_goal2(self, cost_map, robot_pose_px):
         """
         robot_pose_px: [x, y] 机器人当前的像素坐标
         """
@@ -428,10 +511,26 @@ class RosTester(object):
 
         # --- 策略 (1): 寻找自由区间内 Score > 0.63 的点中最近的一个 ---
         # 找到所有满足条件的像素索引 (y_indices, x_indices)
-        high_score_mask = (map_np > 0.6) & (free_mask > 0)
+        high_score_mask = (map_np > 0.63) & (free_mask > 0)
         y_high, x_high = np.where(high_score_mask)
 
         if len(x_high) > 0:
+
+            scores = map_np[y_high, x_high]
+            sorted_indices = np.argsort(scores)[::-1]
+
+            potential_pts = []
+            for idx in sorted_indices:
+                pt = [x_high[idx], y_high[idx]]
+                # 距离去重，防止 4 个粉点叠在一起
+                if all(np.linalg.norm(np.array(pt) - np.array(prev_pt)) > 8 for prev_pt in potential_pts):
+                    potential_pts.append(pt)
+                if len(potential_pts) >= 4:
+                    break
+
+            # 发布粉色标记点
+            self.publish_potential_points_marker(potential_pts)
+
             # 计算这些高分点到机器人的距离
             dists = np.sqrt((x_high - robot_pose_px[0]) ** 2 + (y_high - robot_pose_px[1]) ** 2)
             nearest_idx = np.argmin(dists)

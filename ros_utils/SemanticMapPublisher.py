@@ -179,7 +179,7 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
                 continue
 
     def async_publish(self, uncertainty_grid, free_mask=None, res=0.1, origin_x=-15.0, origin_y=-15.0, height=0.0,
-                      max_area=[-100, 100, -100, 100], threshold=0.05):
+                      max_area=[-100, 100, -100, 100], threshold=0.05, robot_pose_px = None):
         """
         现在你可以直接传入 sg.per_class_uncertainty_map [B, 27, H, W]
         """
@@ -190,82 +190,159 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
                 self.publish_queue.get_nowait()
 
             self.publish_queue.put_nowait(
-                (uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold))
+                (uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold, robot_pose_px))
         except Exception as e:
             rospy.logerr(f"Uncertainty Queue Error: {e}")
 
-    def process_and_publish(self, uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold):
-        # ========== 1. 维度处理（保持不变） ==========
+    # def process_and_publish(self, uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold):
+    #     # ========== 1. 维度处理（保持不变） ==========
+    #     unc_np = self._to_numpy(uncertainty_grid)
+    #     if unc_np.ndim == 4:
+    #         uncertainty_grid, _ = torch.max(uncertainty_grid, dim=1)
+    #         unc_np = self._to_numpy(uncertainty_grid)
+    #     if unc_np.ndim == 3:
+    #         unc_np = unc_np.squeeze(0)  # 最终维度 [H, W]
+    #
+    #     # ========== 2. Free Mask 处理（保持不变） ==========
+    #     f_mask_np = None
+    #     if free_mask is not None:
+    #         f_mask_np = self._to_numpy(free_mask)
+    #         if f_mask_np.ndim == 3:
+    #             f_mask_np = f_mask_np.squeeze(0)
+    #         # 强制对齐 mask 维度（关键：和语义图保持一致）
+    #         if f_mask_np.shape != unc_np.shape:
+    #             f_mask_np = f_mask_np.T
+    #             rospy.logwarn(f"Uncertainty mask维度({f_mask_np.shape})自动转置为{unc_np.shape}")
+    #
+    #     # ========== 3. 完全复刻语义发布器的 max_area 过滤逻辑 ==========
+    #     frame_id = "map"
+    #     raw_marker = self._create_marker("raw_unc", frame_id, res, height)
+    #     aligned_marker = self._create_marker("aligned_unc", frame_id, res, height + 0.01)
+    #
+    #     # 核心修复：复用语义发布器的 fill_marker 逻辑（仅修改颜色映射）
+    #     def fill_unc_marker(target_marker, unc_map, use_free_mask=False):
+    #         min_x, max_x, min_y, max_y = max_area
+    #         # 遍历所有栅格（和语义发布器一致：逐点判断，而非先筛选再过滤）
+    #         for y_idx in range(unc_map.shape[0]):
+    #             for x_idx in range(unc_map.shape[1]):
+    #                 # 1. 不确定性阈值过滤（threshold=0 时不生效）
+    #                 if unc_map[y_idx, x_idx] <= threshold:
+    #                     continue
+    #
+    #                 # 2. 计算物理坐标（和语义发布器完全一致）
+    #                 px = x_idx * res + origin_x
+    #                 py = y_idx * res + origin_y
+    #
+    #                 # 3. max_area 过滤（和语义发布器完全一致）
+    #                 if not (min_x <= px <= max_x and min_y <= py <= max_y):
+    #                     continue
+    #
+    #                 # 4. Free Mask 过滤（仅 aligned_marker 使用）
+    #                 if use_free_mask and f_mask_np is not None:
+    #                     # 确保 mask 索引和栅格索引一致
+    #                     if not f_mask_np[y_idx, x_idx]:
+    #                         continue
+    #
+    #                 # 5. 颜色映射（保留）
+    #                 vmax = np.max(unc_map) if np.max(unc_map) > 0 else 1.0
+    #                 norm_val = np.clip(unc_map[y_idx, x_idx] / vmax, 0.0, 1.0)
+    #                 color_rgba = self.cmap(norm_val)
+    #
+    #                 # 6. 添加点（和语义发布器一致）
+    #                 point = Point(px, py, height if not use_free_mask else height + 0.01)
+    #                 color = ColorRGBA(color_rgba[0], color_rgba[1], color_rgba[2], 0.8)
+    #                 target_marker.points.append(point)
+    #                 target_marker.colors.append(color)
+    #
+    #     # ========== 4. 执行填充和发布 ==========
+    #     # 填充 raw_unc（仅 max_area 过滤，无 free_mask）
+    #     fill_unc_marker(raw_marker, unc_np, use_free_mask=False)
+    #     # 填充 aligned_unc（max_area + free_mask 过滤）
+    #     fill_unc_marker(aligned_marker, unc_np, use_free_mask=True)
+    #
+    #     # 空值处理（避免 RViz 报错）
+    #     if len(raw_marker.points) == 0:
+    #         raw_marker.action = Marker.DELETE
+    #     if len(aligned_marker.points) == 0:
+    #         aligned_marker.action = Marker.DELETE
+    #
+    #     # 发布
+    #     self.pub_raw.publish(raw_marker)
+    #     self.pub_filtered.publish(aligned_marker)
+
+    def process_and_publish(self, uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold,
+                            robot_pose_px):
+        # 1. 维度处理
         unc_np = self._to_numpy(uncertainty_grid)
         if unc_np.ndim == 4:
             uncertainty_grid, _ = torch.max(uncertainty_grid, dim=1)
             unc_np = self._to_numpy(uncertainty_grid)
-        if unc_np.ndim == 3:
-            unc_np = unc_np.squeeze(0)  # 最终维度 [H, W]
+        if unc_np.ndim == 3: unc_np = unc_np.squeeze(0)
 
-        # ========== 2. Free Mask 处理（保持不变） ==========
-        f_mask_np = None
+        # 2. 【核心修改】步长下采样：每 3 个栅格取 1 个
+        # 这样处理 1000x1000 的图实际上只处理约 333x333，速度飞快
+        stride = 1
+        unc_downsampled = unc_np[::stride, ::stride]
+
+        # 3. 向量化获取高分索引
+        y_local, x_local = np.where(unc_downsampled > threshold)
+        if len(y_local) == 0: return
+
+        # 还原回原始坐标系的索引
+        y_idx = y_local * stride
+        x_idx = x_local * stride
+        vals = unc_downsampled[y_local, x_local]
+
+        # 4. 向量化物理坐标计算 (注意：res 也要乘以步长使 Marker 大小看起来连续，或者保持 res 只显示散点)
+        # 这里建议将 Marker 的 scale 设置为 res * stride，这样视觉上是满的
+        display_res = res * stride
+        px = x_idx * res + origin_x
+        py = y_idx * res + origin_y
+
+        # 5. 向量化过滤：物理边界
+        min_x, max_x, min_y, max_y = max_area
+        spatial_mask = (px >= min_x) & (px <= max_x) & (py >= min_y) & (py <= max_y)
+        px, py, vals, x_idx, y_idx = px[spatial_mask], py[spatial_mask], vals[spatial_mask], x_idx[spatial_mask], y_idx[
+            spatial_mask]
+
+        # 6. 向量化计算：距离降级 (10米外 > 0.6 的设为 0.6)
+        dist_threshold_m = 10.0
+        rx_px, ry_px = robot_pose_px[0], robot_pose_px[1]
+        dist_px_sq = (x_idx - rx_px) ** 2 + (y_idx - ry_px) ** 2
+
+        dist_mask = dist_px_sq > (dist_threshold_m / res) ** 2
+        vals[dist_mask & (vals > 0.6)] = 0.6
+
+        # 7. 向量化映射颜色
+        norm_vals = np.clip(vals / 0.8, 0.0, 1.0)
+        colors_rgba = self.cmap(norm_vals)
+
+        # 8. 快速构建 Marker
+        raw_marker = self._create_marker("raw_unc", "map", display_res, height)
+        aligned_marker = self._create_marker("aligned_unc", "map", display_res, height + 0.01)
+
+        # 统一缩放 Marker 大小，使其看起来依然是连续的
+        raw_marker.scale.x = raw_marker.scale.y = display_res
+
+        points = [Point(x, y, height) for x, y in zip(px, py)]
+        colors = [ColorRGBA(c[0], c[1], c[2], 0.8) for c in colors_rgba]
+
+        raw_marker.points = points
+        raw_marker.colors = colors
+
+        # 9. Aligned Map 过滤
         if free_mask is not None:
-            f_mask_np = self._to_numpy(free_mask)
-            if f_mask_np.ndim == 3:
-                f_mask_np = f_mask_np.squeeze(0)
-            # 强制对齐 mask 维度（关键：和语义图保持一致）
-            if f_mask_np.shape != unc_np.shape:
-                f_mask_np = f_mask_np.T
-                rospy.logwarn(f"Uncertainty mask维度({f_mask_np.shape})自动转置为{unc_np.shape}")
+            if free_mask.shape != unc_np.shape: free_mask = free_mask.T
+            # 在原始 free_mask 中采样
+            f_mask_at_pts = free_mask[y_idx, x_idx] > 0
 
-        # ========== 3. 完全复刻语义发布器的 max_area 过滤逻辑 ==========
-        frame_id = "map"
-        raw_marker = self._create_marker("raw_unc", frame_id, res, height)
-        aligned_marker = self._create_marker("aligned_unc", frame_id, res, height + 0.01)
+            indices = np.where(f_mask_at_pts)[0]
+            aligned_marker.points = [Point(px[i], py[i], height + 0.01) for i in indices]
+            aligned_marker.colors = [colors[i] for i in indices]
+            aligned_marker.scale.x = aligned_marker.scale.y = display_res
+        else:
+            aligned_marker.points = [Point(x, y, height + 0.01) for x, y in zip(px, py)]
+            aligned_marker.colors = colors
 
-        # 核心修复：复用语义发布器的 fill_marker 逻辑（仅修改颜色映射）
-        def fill_unc_marker(target_marker, unc_map, use_free_mask=False):
-            min_x, max_x, min_y, max_y = max_area
-            # 遍历所有栅格（和语义发布器一致：逐点判断，而非先筛选再过滤）
-            for y_idx in range(unc_map.shape[0]):
-                for x_idx in range(unc_map.shape[1]):
-                    # 1. 不确定性阈值过滤（threshold=0 时不生效）
-                    if unc_map[y_idx, x_idx] <= threshold:
-                        continue
-
-                    # 2. 计算物理坐标（和语义发布器完全一致）
-                    px = x_idx * res + origin_x
-                    py = y_idx * res + origin_y
-
-                    # 3. max_area 过滤（和语义发布器完全一致）
-                    if not (min_x <= px <= max_x and min_y <= py <= max_y):
-                        continue
-
-                    # 4. Free Mask 过滤（仅 aligned_marker 使用）
-                    if use_free_mask and f_mask_np is not None:
-                        # 确保 mask 索引和栅格索引一致
-                        if not f_mask_np[y_idx, x_idx]:
-                            continue
-
-                    # 5. 颜色映射（保留）
-                    vmax = np.max(unc_map) if np.max(unc_map) > 0 else 1.0
-                    norm_val = np.clip(unc_map[y_idx, x_idx] / vmax, 0.0, 1.0)
-                    color_rgba = self.cmap(norm_val)
-
-                    # 6. 添加点（和语义发布器一致）
-                    point = Point(px, py, height if not use_free_mask else height + 0.01)
-                    color = ColorRGBA(color_rgba[0], color_rgba[1], color_rgba[2], 0.8)
-                    target_marker.points.append(point)
-                    target_marker.colors.append(color)
-
-        # ========== 4. 执行填充和发布 ==========
-        # 填充 raw_unc（仅 max_area 过滤，无 free_mask）
-        fill_unc_marker(raw_marker, unc_np, use_free_mask=False)
-        # 填充 aligned_unc（max_area + free_mask 过滤）
-        fill_unc_marker(aligned_marker, unc_np, use_free_mask=True)
-
-        # 空值处理（避免 RViz 报错）
-        if len(raw_marker.points) == 0:
-            raw_marker.action = Marker.DELETE
-        if len(aligned_marker.points) == 0:
-            aligned_marker.action = Marker.DELETE
-
-        # 发布
         self.pub_raw.publish(raw_marker)
         self.pub_filtered.publish(aligned_marker)
