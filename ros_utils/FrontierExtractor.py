@@ -45,7 +45,9 @@ class FrontierExtractor:
         # ✔️ 2：保留极小的浅灰色边界（避免漏提）；
         # ✔️ 4：过滤小噪声，但可能漏提细窄的浅灰色边界；
         # - 不要设为 1：会提取大量单点噪声，导致边界点杂乱
-        self.min_cluster_size = rospy.get_param('~min_cluster_size', 8)
+        self.min_cluster_size = rospy.get_param('~min_cluster_size', 40)  # 7楼办公区的那条缝隙，40可显示，50不显示。
+
+        # 可视化
         self.marker_scale = rospy.get_param('~marker_scale', 0.3)
 
         # ROS话题

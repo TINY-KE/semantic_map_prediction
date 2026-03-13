@@ -33,7 +33,7 @@ from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 
 from ros_utils.FrontierExtractor import FrontierExtractor
-from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncDualSemanticPublisher
+from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncDualSemanticPublisher, AsyncUncertaintyMarkerPublisher
 
 class RosTester(object):
     """ Implements testing for prediction models
@@ -97,6 +97,14 @@ class RosTester(object):
         self.FrontierExtractor = FrontierExtractor(self.sg)
         self.semantic_map_publisher = AsyncDualSemanticPublisher(raw_topic="/semantic_global_map", filtered_topic="/semantic_global_map_free_only")
         self.semantic_map_publisher_height = 6
+        self.uncertainty_map_publisher = AsyncUncertaintyMarkerPublisher(raw_topic="/uncertainty_global_map", filtered_topic="/uncertainty_global_map_free_only")
+        self.uncertainty_map_publisher_height = -6
+        # 初始化历史边界坐标 [min_x, max_x, min_y, max_y]
+        # 使用 float('inf') 确保第一次更新能成功
+        self.history_min_x = float('inf')
+        self.history_max_x = float('-inf')
+        self.history_min_y = float('inf')
+        self.history_max_y = float('-inf')
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
@@ -122,6 +130,16 @@ class RosTester(object):
         self.seq_buffer.append(msg.header.seq)  # ✨ 同步记录
         if len(self.grid_buffer) == self.batch_size:
             self.run_online_inference()
+
+        # 坐标
+        robot_pose_list = [pose.data for pose in msg.robot_pose]  # 假设格式是 [x, y, theta]
+        curr_x = robot_pose_list[0]
+        curr_y = robot_pose_list[1]
+        # 更新历史最值
+        if curr_x < self.history_min_x: self.history_min_x = curr_x
+        if curr_x > self.history_max_x: self.history_max_x = curr_x
+        if curr_y < self.history_min_y: self.history_min_y = curr_y
+        if curr_y > self.history_max_y: self.history_max_y = curr_y
 
     def run_online_inference(self):
         current_seqs = list(self.seq_buffer)
@@ -248,7 +266,7 @@ class RosTester(object):
                 carto_max_x = carto_origin_x + carto_pixel_w * carto_res  # 最大x（原点x + 宽度*分辨率）
                 carto_min_y = carto_origin_y  # 最小y（原点y）
                 carto_max_y = carto_origin_y + carto_pixel_h * carto_res  # 最大y（原点y + 高度*分辨率）
-                max_area = [carto_min_x, carto_max_x, carto_min_y, carto_max_y]
+                max_area = [carto_min_x, min(carto_max_x, self.history_max_x+3.2), carto_min_y, carto_max_y]
                 self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
                     free_mask= self.FrontierExtractor.target_free_mask,
@@ -259,6 +277,17 @@ class RosTester(object):
                     height=self.semantic_map_publisher_height
                     ,
                     max_area = max_area
+                )
+                self.uncertainty_map_publisher.async_publish(
+                    step_uncertainty.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
+                    free_mask=self.FrontierExtractor.target_free_mask,
+                    # None,
+                    res=0.1,
+                    origin_x=self.sg.origin[0],
+                    origin_y=self.sg.origin[1],
+                    height=self.uncertainty_map_publisher_height,
+                    max_area=max_area,
+                    threshold=0
                 )
 
             time2 = time.time()
@@ -399,7 +428,7 @@ class RosTester(object):
 
         # --- 策略 (1): 寻找自由区间内 Score > 0.63 的点中最近的一个 ---
         # 找到所有满足条件的像素索引 (y_indices, x_indices)
-        high_score_mask = (map_np > 0.63) & (free_mask > 0)
+        high_score_mask = (map_np > 0.6) & (free_mask > 0)
         y_high, x_high = np.where(high_score_mask)
 
         if len(x_high) > 0:
