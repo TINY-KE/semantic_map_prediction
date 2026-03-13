@@ -1149,6 +1149,48 @@ def save_Global_forROS(global_maps_objects, global_map_uncertainty, savepath, na
     plt.close(fig)
     print(f"✅ 已保存 {T} 张全局语义地图至: {savepath}")
 
+
+def save_only_Global_forROS(global_maps_objects, savepath, name):
+    """
+    以原分辨率保存全局地图（1像素=1栅格）
+    参数:
+        global_maps_objects: [B, T, 27, H, W]
+        savepath: 保存路径
+        name: 文件名前缀
+    """
+    # 确保保存路径存在
+    os.makedirs(savepath, exist_ok=True)
+
+    # 1. 维度提取并转为 Numpy
+    # global_maps 形状: [B, T, 27, H, W]
+    global_maps = global_maps_objects.detach().cpu().numpy()
+    B, T, C, cH, cW = global_maps.shape
+
+    for t in range(T):
+        # 2. 提取当前帧 [27, H, W]
+        current_grid = global_maps[0, t]
+
+        # 3. 获取彩色图像
+        # 假设 color_and_extract 返回的是 [H, W, 3] 的 RGB 图像 (uint8 或 0-1 float)
+        img_rgb = color_and_extract(current_grid, 27)
+
+        # 4. 格式转换逻辑
+        # 如果 color_and_extract 返回的是 0-1 的 float，需要转为 0-255 uint8
+        if img_rgb.dtype != np.uint8:
+            img_rgb = (img_rgb * 255).astype(np.uint8)
+
+        # 5. 颜色空间转换 (RGB -> BGR)
+        # 因为 OpenCV 使用 BGR 格式保存
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+
+        # 6. 直接保存
+        # cv2.imwrite 会按照 img_bgr 的矩阵维度 (H, W) 创建图像文件
+        # 这确保了 120x600 的 Tensor 保存出来就是 120x600 像素的图片
+        save_file = os.path.join(savepath, f"{name}.png")
+        cv2.imwrite(save_file, img_bgr)
+
+    print(f"✅ 已按原分辨率({cW}x{cH})保存全局地图至: {save_file}")
+
 # zhjd
 def colorEncode(label_map, color_mapping=color_mapping_27):
     """

@@ -74,17 +74,19 @@ class RosTester(object):
         self.batch_size = 1
         self.grid_buffer = deque(maxlen=self.batch_size)
         self.pose_buffer = deque(maxlen=self.batch_size)
+        self.seq_buffer = deque(maxlen=self.batch_size)
 
         # 2. 初始化全局语义地图[修改地图中心]
         self.spatial_labels = 3
         self.object_labels = 27
         # self.grid_dim = (200, 200)  # 749办公室 7*12米
-        x_length_positive = 300
-        x_length_negative = 300
-        y_length_positive = 60
-        y_length_negative = 60
+        # 为什么以下两者是相反的
+        h_length_positive = 500  # 对应的是机器人坐标系的y轴
+        h_length_negative = 500
+        w_length_positive = 500  # 对应的是机器人坐标系的x轴
+        w_length_negative = 500
 
-        self.grid_dim = (x_length_positive+x_length_negative, y_length_positive+y_length_negative)  # 749办公室 7*12米
+        self.grid_dim = (h_length_positive+h_length_negative, w_length_positive+w_length_negative)  # 749办公室 7*12米
         self.cell_size = 0.1
         self.crop_size = (64, 64)
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
@@ -116,16 +118,20 @@ class RosTester(object):
 
         self.grid_buffer.append(torch.from_numpy(grid_np).float())
         self.pose_buffer.append(torch.from_numpy(robot_pose_np).float())
-
+        self.seq_buffer.append(msg.header.seq)  # ✨ 同步记录
         if len(self.grid_buffer) == self.batch_size:
             self.run_online_inference()
 
     def run_online_inference(self):
-        print(f"\n ------------  {self.num_flag} 开始推理 -------------")
+        current_seqs = list(self.seq_buffer)
+        last_seq = current_seqs[-1]  # 通常使用本批次最后一帧的序号作为保存标识
+        print(f"\n ------------  {self.num_flag} 开始推理，对应 ROS {last_seq} -------------")
         # 构造 Batch: [B=1, T=1, C=27, H=64, W=64]
         grid_seq = torch.stack(list(self.grid_buffer))  # [batch_size, 27, 64, 64]
         pose_seq = torch.stack(list(self.pose_buffer))  # [batch_size, 3]
-        print(pose_seq)
+
+
+        print("[当前机器人的位置]： ",pose_seq)
         batch = {
             'step_ego_grid_27': grid_seq.unsqueeze(0).to(self.device), # [1, batch_size, 27, 64, 64]
             'rel_pose': pose_seq.unsqueeze(0).to(self.device),        # [1, batch_size, 3]
@@ -227,7 +233,7 @@ class RosTester(object):
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
 
-            flag_rviz_2dmap = True
+            flag_rviz_2dmap = False
             # 在 run_online_inference 内部
             if flag_rviz_2dmap:
                 # 计算cartographer地图的显示区域
@@ -250,8 +256,8 @@ class RosTester(object):
                     origin_x=self.sg.origin[0],
                     origin_y=self.sg.origin[1],
                     height=self.semantic_map_publisher_height
-                    ,
-                    max_area = max_area
+                    # ,
+                    # max_area = max_area
                 )
 
             time2 = time.time()
@@ -259,16 +265,20 @@ class RosTester(object):
             time1 = time2
 
             # 保存地图
+
             if self.options.save_nav_images:
                 # save_img_dir_ = self.options.save_img_dir + '/ep_' + str(tstep)  + '/'
-                save_img_dir_ = f"{self.options.save_img_dir}/ros/1/"
+                save_img_dir_ = f"{self.options.save_img_dir}/ros/7_floor"
                 print("     [zhjd-ros] save_img_dir_: ", save_img_dir_)
                 if not os.path.exists(save_img_dir_):
                     os.makedirs(save_img_dir_)
-                viz_utils.save_all_infos_and_mapprediction_ros(batch, pred_maps_objects, savepath=save_img_dir_, name=f'path_{self.num_flag:03d}')
-                viz_utils.save_Global_forROS(step_geo_grid, step_uncertainty, savepath=save_img_dir_, name=f"global_{self.num_flag:03d}")
+                # viz_utils.save_all_infos_and_mapprediction_ros(batch, pred_maps_objects, savepath=save_img_dir_, name=f'path_{self.num_flag:03d}')
+                # viz_utils.save_Global_forROS(step_geo_grid, step_uncertainty, savepath=save_img_dir_, name=f"global_{self.num_flag:03d}")
                 # viz_utils.save_free_mask
                 # viz_utils.save_uncertainty_ros(step_geo_grid, step_uncertainty, pose_coords_list.clone().cpu().numpy(), save_img_dir_, global_time=self.num_flag)
+                if self.num_flag % 30 == 0:
+                    viz_utils.save_only_Global_forROS(step_geo_grid, savepath=save_img_dir_, name=f"global_seq_{last_seq:06d}")
+
 
             time2 = time.time()
             print(f" [耗时]全局: {time2 - time0}")  # 输出示例：1773070000.123456
@@ -379,6 +389,13 @@ class RosTester(object):
             rospy.logwarn("Free mask is None, returning None")
             return None
 
+        # --- 核心修复：检查并对齐维度 ---
+        # 如果 map_np 是 (120, 600) 而 free_mask 是 (600, 120)
+        if map_np.shape != free_mask.shape:
+            # print(f"DEBUG: 对齐维度 {map_np.shape} vs {free_mask.shape}")
+            # 通常我们需要将 free_mask 转置以匹配 cost_map 的 [H, W] 顺序
+            free_mask = free_mask.T
+
         # --- 策略 (1): 寻找自由区间内 Score > 0.63 的点中最近的一个 ---
         # 找到所有满足条件的像素索引 (y_indices, x_indices)
         high_score_mask = (map_np > 0.63) & (free_mask > 0)
@@ -426,3 +443,4 @@ class RosTester(object):
                 return torch.tensor(best_f_px, dtype=torch.int64, device=self.device)
             else:
                 return None
+

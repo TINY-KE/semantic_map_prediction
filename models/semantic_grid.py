@@ -45,8 +45,8 @@ class SemanticGrid(object):
 
         # 如果你的 grid_dim 是 (150, 150)，中心点在 (0,0) 处：
         if origin is None:
-            self.origin = [- (self.grid_dim[0] * self.cell_size) / 2,
-                              - (self.grid_dim[1] * self.cell_size) / 2]
+            self.origin = [- (self.grid_dim[1] * self.cell_size) / 2,
+                              - (self.grid_dim[0] * self.cell_size) / 2]
         else:
             self.origin = origin
 
@@ -195,7 +195,7 @@ class SemanticGrid(object):
         # assumes batch_size=1
         B, T, _, cH, cW = uncertainty_crop.shape
         ego_uncertainty_map = torch.zeros((T,1,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
-        ego_uncertainty_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = uncertainty_crop.squeeze(0)
+        ego_uncertainty_map[:,:, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = uncertainty_crop.squeeze(0)
         geo_uncertainty_maps = self.spatialTransformer(grid=ego_uncertainty_map, pose=pose, abs_pose=abs_pose)
         self.update_uncertainty_map_avg(geo_grid=geo_uncertainty_maps.unsqueeze(0)) # updates sg.uncertainty_map
 
@@ -205,7 +205,7 @@ class SemanticGrid(object):
         B, T, C, cH, cW = per_class_uncertainty_crop.shape
         # 初始值设为 0
         ego_per_class_uncertainty_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
-        ego_per_class_uncertainty_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = per_class_uncertainty_crop.squeeze(0)
+        ego_per_class_uncertainty_map[:,:, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = per_class_uncertainty_crop.squeeze(0)
         geo_per_class_uncertainty_maps = self.spatialTransformer(grid=ego_per_class_uncertainty_map, pose=pose, abs_pose=abs_pose)
         return self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
 
@@ -213,7 +213,7 @@ class SemanticGrid(object):
         B, T, C, cH, cW = per_class_uncertainty_crop.shape
         # 初始值设为 0
         ego_per_class_uncertainty_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
-        ego_per_class_uncertainty_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = per_class_uncertainty_crop.squeeze(0)
+        ego_per_class_uncertainty_map[:,:, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = per_class_uncertainty_crop.squeeze(0)
         geo_per_class_uncertainty_maps = self.spatialTransformer_ros_without_rot(grid=ego_per_class_uncertainty_map, pose=pose)
         return self.update_per_class_uncertainty_map_avg(geo_grid=geo_per_class_uncertainty_maps.unsqueeze(0)) # updates sg.per_class_uncertainty_map
 
@@ -224,7 +224,7 @@ class SemanticGrid(object):
         ego_pred_map = torch.ones((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device) * (1/C)
         # # ZHJD版：初始值设为0
         # ego_pred_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
-        ego_pred_map[:,:, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(0)
+        ego_pred_map[:,:, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = prediction_crop.squeeze(0)
         # 进行位姿变换（局部 → 全局）
         geo_pred_map = self.spatialTransformer(grid=ego_pred_map, pose=pose, abs_pose=abs_pose)
 
@@ -268,12 +268,49 @@ class SemanticGrid(object):
                                   device=self.device) * (1 / C)
         # # ZHJD版：初始值设为0
         # ego_pred_map = torch.zeros((T,C,self.grid_dim[0],self.grid_dim[1]), dtype=torch.float32, device=self.device)
-        ego_pred_map[:, :, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(
+        ego_pred_map[:, :, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = prediction_crop.squeeze(
             0)
         # 进行位姿变换（局部 → 全局）
         geo_pred_map = self.spatialTransformer(grid=ego_pred_map, pose=pose, abs_pose=abs_pose)
 
         return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+
+    def update_sem_grid_bayes_with_weights(self, geo_grid):
+        # geo_grid -- B x T x num_of_classes x grid_dim x grid_dim
+        step_geo_grid = torch.zeros((geo_grid.shape[0], geo_grid.shape[1], self.object_labels,
+                                     self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32).to(geo_grid.device)
+
+        # 1. 定义类别权重向量 (与 label_pooling 中的优先级对应)
+        # 规则：桌子(3) > 椅子(1) > 门(2) > 墙(15,17) > 其他
+        weights = torch.ones(self.object_labels, device=geo_grid.device)
+        weights[3] = 2.0*1.5  # Table: 极高权重，一旦看到就很难被抹除
+        weights[1] = 1.8*1.5  # Chair
+        weights[2] = 1.5*1.5  # Door
+        weights[15] = 1.2*1.5  # Structure
+        weights[17] = 1.2  # Free-space
+
+        # 将权重调整为适合矩阵运算的形状 [1, C, 1, 1]
+        weights_v = weights.view(1, -1, 1, 1)
+
+        for i in range(geo_grid.shape[1]):  # 遍历序列帧
+            # 获取当前帧观测
+            new_obsv_grid = geo_grid[:, i, :, :, :]
+
+            # 2. 对当前观测应用种类权重 (使用幂运算增强特定类别的对比度)
+            # 这样高置信度的类别在乘法后会占据更大的比例
+            weighted_obsv = torch.pow(new_obsv_grid, weights_v)
+
+            # 3. 贝叶斯融合：当前加权观测 * 历史累积地图
+            mul_probs_grid = weighted_obsv * self.sem_grid
+
+            # 4. 归一化，重新分布概率
+            normalization_grid = torch.sum(mul_probs_grid, dim=1, keepdim=True)
+            self.sem_grid = mul_probs_grid / (normalization_grid + 1e-12)  # 防止除零
+
+            # 5. 保存结果
+            step_geo_grid[:, i, :, :, :] = self.sem_grid.clone()
+
+        return step_geo_grid
 
     def spatialTransformer_ros_without_rot(self, grid, pose):
         # Input:
@@ -329,9 +366,9 @@ class SemanticGrid(object):
         ego_pred_map = torch.zeros((T, C, self.grid_dim[0], self.grid_dim[1]), dtype=torch.float32,
                                   device=self.device) * (1 / C)
         # # ZHJD版：初始值设为0
-        ego_pred_map[:, :, self.crop_start:self.crop_end, self.crop_start:self.crop_end] = prediction_crop.squeeze(
-            0)
+        ego_pred_map[:, :, self.crop_start_x:self.crop_end_x, self.crop_start_y:self.crop_end_y] = prediction_crop.squeeze(0)
         # 进行位姿变换（局部 → 全局）
         geo_pred_map = self.spatialTransformer_ros_without_rot(grid=ego_pred_map, pose=pose)
 
         return self.update_sem_grid_bayes(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
+        # return self.update_sem_grid_bayes_binzhou(geo_grid=geo_pred_map.unsqueeze(0))  # updates sg.sem_grid , 形状为 torch.Size([1, 10, 27, 400, 400])
