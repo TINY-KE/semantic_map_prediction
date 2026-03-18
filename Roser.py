@@ -47,26 +47,28 @@ class RosTester(object):
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # 0. 完整加载 Ensemble 模型逻辑
-        self.models_dict = {}  # keys are the ids of the models in the ensemble
-        ensemble_exp_rsmp = os.listdir(
-            self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
-        ensemble_exp_rsmp.sort()  # in case the models are numbered put them in order
-        for n in range(self.options.ensemble_size):
-            print("     [zhjd-slam-search] RosTester Init Loading model ", n)
-            self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
-            self.models_dict[n] = {k: v.to(self.device) for k, v in self.models_dict[n].items()}
+        flag_load_debug = True
+        if flag_load_debug:
+            # 0. 完整加载 Ensemble 模型逻辑
+            self.models_dict = {}  # keys are the ids of the models in the ensemble
+            ensemble_exp_rsmp = os.listdir(
+                self.options.ensemble_dir_rsmp)  # ensemble_dir should be a dir that holds multiple experiments
+            ensemble_exp_rsmp.sort()  # in case the models are numbered put them in order
+            for n in range(self.options.ensemble_size):
+                print("     [zhjd-slam-search] RosTester Init Loading model ", n)
+                self.models_dict[n] = {'predictor_model': get_predictor_rsmp(self.options)}
+                self.models_dict[n] = {k: v.to(self.device) for k, v in self.models_dict[n].items()}
 
-            # Needed only for models trained with multi-gpu setting
-            self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
+                # Needed only for models trained with multi-gpu setting
+                self.models_dict[n]['predictor_model'] = nn.DataParallel(self.models_dict[n]['predictor_model'])
 
-            checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
-            print('checkpoint_dir', checkpoint_dir)
+                checkpoint_dir = self.options.ensemble_dir_rsmp + "/" + ensemble_exp_rsmp[n]
+                print('checkpoint_dir', checkpoint_dir)
 
-            latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
-            print("Model", n, "loading checkpoint", latest_checkpoint)
-            self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
-            self.models_dict[n]["predictor_model"].eval()
+                latest_checkpoint = tutils.get_latest_model(save_dir=checkpoint_dir)
+                print("Model", n, "loading checkpoint", latest_checkpoint)
+                self.models_dict[n] = tutils.load_model(models=self.models_dict[n], checkpoint_file=latest_checkpoint)
+                self.models_dict[n]["predictor_model"].eval()
 
 
 
@@ -90,11 +92,16 @@ class RosTester(object):
         self.grid_dim = (h_length_positive+h_length_negative, w_length_positive+w_length_negative)  # 749办公室 7*12米
         self.cell_size = 0.1
         self.crop_size = (64, 64)
+        # self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
+        #                   spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
+        #                   recovered_map_path =  "/home/robotlab/Downloads/global_map.png")
         self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
-                          spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
-                          recovered_map_path =  "/home/robotlab/Downloads/global_map/combined_image5.png")
+                               spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
+                               recovered_map_path="/home/robotlab/Downloads/ruihai_global_seq_182185.png")
 
         # 3.边界和地图处理
+        # rospy.loginfo("Models loaded, stabilizing system...")
+        # rospy.sleep(2.0)  # 让出 CPU 时间片，让 ROS 处理队列中的地图包
         self.FrontierExtractor = FrontierExtractor(self.sg)
         self.semantic_map_publisher = AsyncDualSemanticPublisher(raw_topic="/semantic_global_map", filtered_topic="/semantic_global_map_free_only")
         self.semantic_map_publisher_height = 6
@@ -109,9 +116,10 @@ class RosTester(object):
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
-        self.goal_pub = rospy.Publisher('/move_base_simple/goal_sigma', PoseStamped, queue_size=1)
+        # self.goal_pub = rospy.Publisher('/move_base_simple/goal_sigma', PoseStamped, queue_size=1)
         self.potential_points_pub = rospy.Publisher('/potential_exploration_points', Marker, queue_size=1)
-
+        self.ltg_marker_pub = rospy.Publisher('/long_term_goal_marker', Marker, queue_size=1)
+        self.ltg_marker_pub_2 = rospy.Publisher('/long_term_goal_marker_2', Marker, queue_size=1)
 
         self.num_flag = 0
         self.prev_time = time.time()  # 初始化时间戳
@@ -209,26 +217,7 @@ class RosTester(object):
             robot_pose_px = [robot_x_px, robot_y_px]
             ltg = self.get_long_term_goal(eucost_map, robot_pose_px)
             if ltg is not None:
-                print(f" 发布探索点(栅格坐标): {ltg[0]}, {ltg[1]}")
-                flag_pub_ltg = True
-                if flag_pub_ltg:
-                    goal_x_idx = ltg[0]
-                    goal_y_idx = ltg[1]
-                    # 转换为物理坐标 (单位：米)
-                    # 公式：物理位置 = (索引 * 分辨率) + 地图原点
-                    # 注意：这里的物理 x/y 映射关系需与你的 SemanticGrid 定义一致
-                    world_goal_x = goal_x_idx * self.cell_size + self.sg.origin[0]
-                    world_goal_y = goal_y_idx * self.cell_size + self.sg.origin[1]
-                    goal_msg = PoseStamped()
-                    goal_msg.header.stamp = rospy.Time.now()
-                    goal_msg.header.frame_id = "map"  # 或者是你 SLAM 的全局坐标系
-                    goal_msg.pose.position.x = world_goal_x
-                    goal_msg.pose.position.y = world_goal_y
-                    goal_msg.pose.position.z = 0.0
-                    goal_msg.pose.orientation.z = 1.0
-                    self.goal_pub.publish(goal_msg)
-                    print(
-                        f" [Ros-Goal] 发送导航点: 像素({goal_x_idx}, {goal_y_idx}) -> 物理({world_goal_x:.2f}, {world_goal_y:.2f})")
+                self.publish_ltg_marker(ltg.cpu().numpy())
             time2 = time.time()
             print(f" [耗时]路径点规划耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
@@ -269,7 +258,11 @@ class RosTester(object):
                 carto_max_x = carto_origin_x + carto_pixel_w * carto_res  # 最大x（原点x + 宽度*分辨率）
                 carto_min_y = carto_origin_y  # 最小y（原点y）
                 carto_max_y = carto_origin_y + carto_pixel_h * carto_res  # 最大y（原点y + 高度*分辨率）
-                max_area = [carto_min_x, min(carto_max_x, self.history_max_x+3.2), carto_min_y, carto_max_y]
+                if last_seq > 500:
+                    min_compined = carto_max_x
+                else:
+                    min_compined = min(carto_max_x, self.history_max_x + 3.2)
+                max_area = [carto_min_x, min_compined, carto_min_y, carto_max_y]
                 self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
                     free_mask= self.FrontierExtractor.target_free_mask,
@@ -372,11 +365,57 @@ class RosTester(object):
 
         self.potential_points_pub.publish(marker)
 
+    def publish_ltg_marker(self, goal_px):
+        """
+        以亮绿色圆柱体形式发布最终选定的导航点 (仅发布一个高度)
+        """
+        if goal_px is None:
+            return
+
+        # 1. 物理坐标转换 (确保处理的是 Numpy 数组)
+        if isinstance(goal_px, torch.Tensor):
+            goal_px = goal_px.detach().cpu().numpy()
+
+        world_x = goal_px[0] * self.cell_size + self.sg.origin[0]
+        world_y = goal_px[1] * self.cell_size + self.sg.origin[1]
+
+        # 2. 创建 Marker
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = "final_goal"
+        marker.id = 100  # 固定 ID 确保新目标会覆盖旧目标
+        marker.type = Marker.CYLINDER  # <--- 修改为圆柱体
+        marker.action = Marker.ADD
+
+        # 尺寸：直径 0.5m (x, y)，高度 0.2m (z)
+        marker.scale.x = 0.4
+        marker.scale.y = 0.4
+        marker.scale.z = 0.4
+
+        # 颜色：亮绿色
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0  # 不透明
+
+        # 位置
+        marker.pose.position.x = world_x
+        marker.pose.position.y = world_y
+        # 设置在地面层高度 (0.15m)
+        marker.pose.position.z = 0.15
+        marker.pose.orientation.w = 1.0
+
+        # (可选) 设置为 0 表示 Marker 永远不会自动消失，直到被新 ID 覆盖
+        marker.lifetime = rospy.Duration(0)
+
+        self.ltg_marker_pub.publish(marker)
+
+        marker.pose.position.z = 0.15 + self.uncertainty_map_publisher_height
+        self.ltg_marker_pub_2.publish(marker)
 
 
-
-
-    # （1）将自由区间内score大于6.3的点，选出来，从中选择一个最近的点
+    # （1）将自由区间内score大于0.6的点，选出来，从中选择一个最近的点
     # （2）如果没有大于6.3的点，则直接选择一个距离最近的frontier（即不考虑frontier的socre）
     def get_long_term_goal(self, cost_map, robot_pose_px):
         """
@@ -440,10 +479,10 @@ class RosTester(object):
             self.publish_potential_points_marker(potential_pts)
 
         # ==========================================================
-        # 策略 (2): 导航决策逻辑 - 附近的高分点 (> 0.63)
+        # 策略 (2): 导航决策逻辑 - 附近的高分点
         # ==========================================================
         # 复合过滤：高分 且 Free 且 附近
-        nearby_high_score_mask = (map_np > 0.63) & (free_mask > 0) & distance_mask
+        nearby_high_score_mask = (map_np > 0.6) & (free_mask > 0) & distance_mask
         y_high, x_high = np.where(nearby_high_score_mask)
 
         if len(x_high) > 0:

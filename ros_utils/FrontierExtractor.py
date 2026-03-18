@@ -55,7 +55,7 @@ class FrontierExtractor:
             '/frontier_clusters', Marker, queue_size=10, latch=True
         )
         self._sub_map = rospy.Subscriber(
-            '/map', OccupancyGrid, self._map_callback, queue_size=1
+            '/map', OccupancyGrid, self._map_callback, queue_size=1,  buff_size=2**24  # 16777216 字节
         )
 
         # 自身核心地图数据（内部维护）
@@ -123,16 +123,45 @@ class FrontierExtractor:
         except Exception as e:
             rospy.logerr(f"处理地图时出错: {str(e)}")
 
+    # def _extract_frontier_mask(self, grid: np.ndarray) -> np.ndarray:
+    #     """提取边界点掩码（空闲区域且邻域包含未知区域）"""
+    #     frontier_mask = np.zeros_like(grid, dtype=bool)
+    #     for y in range(1, grid.shape[0] - 1):
+    #         for x in range(1, grid.shape[1] - 1):
+    #             # 原来：if grid[y, x] == 0 and -1 in grid[y-1:y+2, x-1:x+2]:
+    #             # 现在：0~50 都算可走/边界，把浅灰色包含进来
+    #             if 0 <= grid[y, x] <= 50 and -1 in grid[y - 1:y + 2, x - 1:x + 2]:
+    #                 frontier_mask[y, x] = True
+    #     return frontier_mask
+
     def _extract_frontier_mask(self, grid: np.ndarray) -> np.ndarray:
-        """提取边界点掩码（空闲区域且邻域包含未知区域）"""
-        frontier_mask = np.zeros_like(grid, dtype=bool)
-        for y in range(1, grid.shape[0] - 1):
-            for x in range(1, grid.shape[1] - 1):
-                # 原来：if grid[y, x] == 0 and -1 in grid[y-1:y+2, x-1:x+2]:
-                # 现在：0~50 都算可走/边界，把浅灰色包含进来
-                if 0 <= grid[y, x] <= 50 and -1 in grid[y - 1:y + 2, x - 1:x + 2]:
-                    frontier_mask[y, x] = True
+        """
+        使用形态学操作高效提取边界点掩码
+        逻辑：处于空闲区域（0-50）且其邻域内包含未知区域（-1）的点
+        """
+        # 1. 识别未知区域掩码 (-1)
+        unknown_mask = (grid == -1)
+
+        # 2. 对未知区域进行膨胀 (Dilation)
+        # 这一步相当于寻找所有“靠近未知区域”的栅格
+        # structure=np.ones((3, 3)) 代表 8 邻域
+        dilated_unknown = ndimage.binary_dilation(unknown_mask, structure=np.ones((3, 3)))
+
+        # 3. 识别空闲区域掩码 (0 <= grid <= 50)
+        # 注意：这里要确保 grid 是已知的
+        free_mask = (grid >= 0) & (grid <= 50)
+
+        # 4. 取交集：既在空闲区域，又紧邻未知区域
+        frontier_mask = free_mask & dilated_unknown
+
+        # 5. 可选：移除占据区域边缘的干扰（防止机器人撞墙）
+        # 如果你想让边界点稍微远离障碍物，可以加上这个：
+        # occupied_mask = (grid > self.FREE_THRESHOLD)
+        # dilated_occupied = ndimage.binary_dilation(occupied_mask, structure=np.ones((5, 5)))
+        # frontier_mask = frontier_mask & ~dilated_occupied
+
         return frontier_mask
+
 
     def _cluster_frontier_regions(self, mask: np.ndarray, res: float, origin_x: float, origin_y: float) -> list:
         """连通区域分析，大区域用K-Means拆分"""
