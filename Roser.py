@@ -32,6 +32,7 @@ from geometry_msgs.msg import PoseStamped, Point
 from StepEgoMapPose_msgs.msg import StepEgoMapPose
 from geometry_msgs.msg import PoseStamped # 确保在文件顶部导入
 from visualization_msgs.msg import Marker
+from tf.transformations import euler_from_quaternion
 
 from ros_utils.FrontierExtractor import FrontierExtractor
 from ros_utils.SemanticMapPublisher import  SemanticMarkerPublisher, AsyncDualSemanticPublisher, AsyncUncertaintyMarkerPublisher
@@ -92,27 +93,48 @@ class RosTester(object):
         self.grid_dim = (h_length_positive+h_length_negative, w_length_positive+w_length_negative)  # 749办公室 7*12米
         self.cell_size = 0.1
         self.crop_size = (64, 64)
-        # self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
-        #                   spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
-        #                   recovered_map_path =  "/home/robotlab/Downloads/global_map.png")
-        self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
-                               spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
-                               recovered_map_path="/home/robotlab/Downloads/ruihai_global_seq_182185.png")
+        scene = 1
+        if scene == 1:
+            self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
+                              spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
+                              recovered_map_path =  "/home/robotlab/semantic-map-prediction/zhjd_scripts/pic/global_map_7floor.png")
+        elif scene == 2:
+            self.sg = SemanticGrid(self.batch_size, self.grid_dim, self.crop_size[0], self.cell_size,
+                                   spatial_labels=self.spatial_labels, object_labels=self.object_labels, origin=None,
+                                   recovered_map_path="/home/robotlab/semantic-map-prediction/zhjd_scripts/pic/ruihai_global_seq_182185.png")
 
         # 3.边界和地图处理
         # rospy.loginfo("Models loaded, stabilizing system...")
         # rospy.sleep(2.0)  # 让出 CPU 时间片，让 ROS 处理队列中的地图包
         self.FrontierExtractor = FrontierExtractor(self.sg)
         self.semantic_map_publisher = AsyncDualSemanticPublisher(raw_topic="/semantic_global_map", filtered_topic="/semantic_global_map_free_only")
-        self.semantic_map_publisher_height = 6
+        self.semantic_map_publisher_height = 2
         self.uncertainty_map_publisher = AsyncUncertaintyMarkerPublisher(raw_topic="/uncertainty_global_map", filtered_topic="/uncertainty_global_map_free_only")
-        self.uncertainty_map_publisher_height = -6
+        self.uncertainty_map_publisher_height = -2
+        if scene == 1:
+            # 7floor
+            # self.y_offset_cells_semantic = 20
+            # self.y_offset_cells_uncertainty = -25
+            self.y_offset_cells_semantic = 75
+            self.y_offset_cells_uncertainty = -105
+        elif scene == 2:
+            # ruihai
+            self.y_offset_cells_semantic = 35
+            self.y_offset_cells_uncertainty = -45
+
         # 初始化历史边界坐标 [min_x, max_x, min_y, max_y]
         # 使用 float('inf') 确保第一次更新能成功
         self.history_min_x = float('inf')
         self.history_max_x = float('-inf')
         self.history_min_y = float('inf')
         self.history_max_y = float('-inf')
+
+        self.traj_free_mask = np.zeros(self.grid_dim, dtype=np.uint8)
+        self.last_robot_px = None  # 用于绘制连续轨迹
+        if scene == 1:
+            self.window = 35 # 7floor
+        elif scene == 2:
+            self.window = 20  # ruihai
 
         # 5. ROS 订阅和发布
         rospy.Subscriber("/step_ego_map_pose", StepEgoMapPose, self.ros_callback)
@@ -136,12 +158,6 @@ class RosTester(object):
         robot_pose_list = [pose.data for pose in msg.robot_pose]
         robot_pose_np = np.array(robot_pose_list, dtype=np.float32)
 
-        self.grid_buffer.append(torch.from_numpy(grid_np).float())
-        self.pose_buffer.append(torch.from_numpy(robot_pose_np).float())
-        self.seq_buffer.append(msg.header.seq)  # ✨ 同步记录
-        if len(self.grid_buffer) == self.batch_size:
-            self.run_online_inference()
-
         # 坐标
         robot_pose_list = [pose.data for pose in msg.robot_pose]  # 假设格式是 [x, y, theta]
         curr_x = robot_pose_list[0]
@@ -151,6 +167,17 @@ class RosTester(object):
         if curr_x > self.history_max_x: self.history_max_x = curr_x
         if curr_y < self.history_min_y: self.history_min_y = curr_y
         if curr_y > self.history_max_y: self.history_max_y = curr_y
+        curr_x_px = int((curr_x - self.sg.origin[0]) / self.cell_size)
+        curr_y_px = int((curr_y - self.sg.origin[1]) / self.cell_size)
+        # 更新轨迹掩码
+        self.update_traj_free_mask([curr_x_px, curr_y_px])
+
+        self.grid_buffer.append(torch.from_numpy(grid_np).float())
+        self.pose_buffer.append(torch.from_numpy(robot_pose_np).float())
+        self.seq_buffer.append(msg.header.seq)  # ✨ 同步记录
+        if len(self.grid_buffer) == self.batch_size:
+            self.run_online_inference()
+
 
     def run_online_inference(self):
         current_seqs = list(self.seq_buffer)
@@ -215,31 +242,31 @@ class RosTester(object):
             robot_x_px = int((robot_pose_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
             robot_y_px = int((robot_pose_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
             robot_pose_px = [robot_x_px, robot_y_px]
-            ltg = self.get_long_term_goal(eucost_map, robot_pose_px)
+            ltg = self.get_long_term_goal_forward(eucost_map, robot_pose_px, robot_pose_world[2])
             if ltg is not None:
                 self.publish_ltg_marker(ltg.cpu().numpy())
             time2 = time.time()
             print(f" [耗时]路径点规划耗时: {time2 - time1}")  # 输出示例：1773070000.123456
             time1 = time2
 
-            # 6.3 用墙来修正预测
-            step_ego_grid_27 = batch['step_ego_grid_27']
-            for t in range(T):
-                pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]  # [27,64,64]
-                pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]  # [27,64,64]
-                # 计算 bottom 层每个栅格的 argmax
-                val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
-                # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
-                fail_mask = (idx_bottom != 15)  # 只保留贝叶斯更新中的墙
-                # 3. 初始化最终的融合地图
-                # 我们先完整复制 bottom 的数据
-                fused_map = pred_maps_objects_bottom.clone()
-                # 4. 执行叠加逻辑：
-                # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
-                # 这里使用广播机制处理 27 个通道
-                fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
-                pred_maps_objects[0, t, :, :, :] = fused_map
-            # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
+            # # 6.3 用墙来修正预测
+            # step_ego_grid_27 = batch['step_ego_grid_27']
+            # for t in range(T):
+            #     pred_maps_objects_bottom = step_ego_grid_27[0, t, :, :, :]  # [27,64,64]
+            #     pred_maps_objects_top = pred_maps_objects[0, t, :, :, :]  # [27,64,64]
+            #     # 计算 bottom 层每个栅格的 argmax
+            #     val_bottom, idx_bottom = torch.max(pred_maps_objects_bottom, dim=0)  # idx_bottom shape: [64, 64]
+            #     # 2. 构造掩码 (Mask)：找出 argmax 为 0 的位置
+            #     fail_mask = (idx_bottom != 15)  # 只保留贝叶斯更新中的墙
+            #     # 3. 初始化最终的融合地图
+            #     # 我们先完整复制 bottom 的数据
+            #     fused_map = pred_maps_objects_bottom.clone()
+            #     # 4. 执行叠加逻辑：
+            #     # 在所有 fail_mask 为 True 的坐标点，用 top 的 27 维概率向量替换掉 bottom 的
+            #     # 这里使用广播机制处理 27 个通道
+            #     fused_map[:, fail_mask] = pred_maps_objects_top[:, fail_mask]
+            #     pred_maps_objects[0, t, :, :, :] = fused_map
+            # # viz_utils.show_image_color_and_extract(pred_maps_objects, "Predicted Map", 27)
 
             # 更新全局地图 (调用你原本的方法)
             step_geo_grid = self.sg.register_sem_pred_ros_without_rot(prediction_crop=pred_maps_objects, pose=_rel_pose)
@@ -265,18 +292,21 @@ class RosTester(object):
                 max_area = [carto_min_x, min_compined, carto_min_y, carto_max_y]
                 self.semantic_map_publisher.async_publish(
                     step_geo_grid.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
-                    free_mask= self.FrontierExtractor.target_free_mask,
+                    free_mask= self.traj_free_mask,
+                    # free_mask= self.FrontierExtractor.target_free_mask,
                     # None,
                     res=0.1,
                     origin_x=self.sg.origin[0],
                     origin_y=self.sg.origin[1],
                     height=self.semantic_map_publisher_height
                     ,
-                    max_area = max_area
+                    max_area = max_area,
+                    y_offset_cells = self.y_offset_cells_semantic
                 )
                 self.uncertainty_map_publisher.async_publish(
                     step_uncertainty.squeeze(0),  # 去掉批次维度，变成 [1, 27, 200, 200]
-                    free_mask=self.FrontierExtractor.target_free_mask,
+                    free_mask=self.traj_free_mask,
+                    # free_mask=self.FrontierExtractor.target_free_mask,
                     # None,
                     res=0.1,
                     origin_x=self.sg.origin[0],
@@ -284,7 +314,8 @@ class RosTester(object):
                     height=self.uncertainty_map_publisher_height,
                     max_area=max_area,
                     threshold=0,
-                    robot_pose_px = robot_pose_px
+                    robot_pose_px = robot_pose_px,
+                    y_offset_cells = self.y_offset_cells_uncertainty
                 )
 
             time2 = time.time()
@@ -359,7 +390,7 @@ class RosTester(object):
 
             p = Point()
             p.x = world_x
-            p.y = world_y
+            p.y = world_y + self.y_offset_cells_uncertainty * self.cell_size
             p.z = self.uncertainty_map_publisher_height + 0.12
             marker.points.append(p)
 
@@ -405,14 +436,177 @@ class RosTester(object):
         # 设置在地面层高度 (0.15m)
         marker.pose.position.z = 0.15
         marker.pose.orientation.w = 1.0
-
         # (可选) 设置为 0 表示 Marker 永远不会自动消失，直到被新 ID 覆盖
         marker.lifetime = rospy.Duration(0)
-
         self.ltg_marker_pub.publish(marker)
 
+        marker.pose.position.y = world_y + self.y_offset_cells_uncertainty * self.cell_size
         marker.pose.position.z = 0.15 + self.uncertainty_map_publisher_height
         self.ltg_marker_pub_2.publish(marker)
+
+    def update_traj_free_mask(self, robot_pose_px):
+        """
+        以机器人当前像素位置为中心，将周围 6.4m x 6.4m (64x64 px) 的方块区域设为 free
+        此方法不需要考虑轨迹连续性问题
+        robot_pose_px: [x, y] 当前像素坐标
+        """
+        x_px, y_px = int(robot_pose_px[0]), int(robot_pose_px[1])
+        H, W = self.grid_dim
+
+        # 1. 定义方块窗口的“半宽” (6.4m = 64px, 半宽 = 32px)
+        half_size = self.window
+        if x_px > 400 or  y_px > 400 :
+            half_size = 55
+
+        # 2. 计算切片边界 (左、右、下、上)
+        # 注意：NumPy 切片是 [start:end]，不包含 end
+        # 我们希望中心点是 robot_pose_px
+        x_min = x_px - half_size
+        x_max = x_px + half_size  # 实际跨度为 (x+32) - (x-32) = 64
+        y_min = y_px - half_size
+        y_max = y_px + half_size
+
+        # 3. 🔴 关键步骤：处理越界情况 🔴
+        # 如果机器人靠近地图边缘，直接切片会导致 NumPy 报错或产生不想要的结果
+        # 我们必须把切片范围钳制在 [0, W] 和 [0, H] 之间
+        safe_x_min = max(0, x_min)
+        safe_x_max = min(W, x_max)
+        safe_y_min = max(0, y_min)
+        safe_y_max = min(H, y_max)
+
+        # 4. 检查有效性 (防止机器人完全超出 grid_dim 范围导致 max < min)
+        if safe_x_max > safe_x_min and safe_y_max > safe_y_min:
+            # 5. 将该方块区域填充为 255 (代表亲历的 Free 区域)
+            # 🔴 核心警告：坐标系对齐 🔴
+            # 在你的 SemanticGrid 和图片保存逻辑中，地图坐标通常是：y 对应行 (Row), x 对应列 (Col)
+            # 如果 self.grid_dim 是 (H, W)，则切片必须是 [y, x] 顺序
+            self.traj_free_mask[safe_y_min:safe_y_max, safe_x_min:safe_x_max] = 255
+
+    def get_long_term_goal_forward(self, cost_map, robot_pose_px, robot_yaw):
+        """
+            robot_pose_px: [x, y] 机器人当前的像素坐标 (Grid Coordinates)
+            cost_map: 认知不确定性地图 (Sigma Map)
+            robot_yaw: 机器人当前的朝向弧度 (Float, Range: -pi to pi)
+            """
+        # ==========================================================
+        # 1. 预处理与维度对齐
+        # ==========================================================
+        map_np = cost_map.detach().cpu().numpy()
+        if map_np.ndim == 3:
+            map_np = map_np[0, :, :]
+        elif map_np.ndim == 4:
+            map_np = map_np[0, 0, :, :]
+
+        free_mask = self.FrontierExtractor.target_free_mask
+        if free_mask is None:
+            rospy.logwarn("--- [LTG] Free mask is None, skipping ---")
+            return None
+
+        if map_np.shape != free_mask.shape:
+            if map_np.shape == free_mask.T.shape:
+                free_mask = free_mask.T
+            else:
+                rospy.logerr(f"--- [LTG] Shape mismatch: {map_np.shape} vs {free_mask.shape} ---")
+                return None
+
+        H, W = map_np.shape
+        search_radius_px = int(5.0 / self.cell_size)  # 默认5米搜索半径
+
+        # ==========================================================
+        # 距离过滤基础数据
+        # ==========================================================
+        Y, X = np.ogrid[:H, :W]
+        dist_sq = (X - robot_pose_px[0]) ** 2 + (Y - robot_pose_px[1]) ** 2
+        distance_mask = dist_sq <= search_radius_px ** 2
+
+        # ==========================================================
+        # 策略 (1): 可视化附近的潜力点 (Top 4)
+        # ==========================================================
+        nearby_free_mask = (free_mask > 0) & distance_mask
+        y_free, x_free = np.where(nearby_free_mask)
+
+        if len(x_free) > 0:
+            free_scores = map_np[y_free, x_free]
+            sorted_indices = np.argsort(free_scores)[::-1]
+            potential_pts = []
+            for idx in sorted_indices:
+                pt = [x_free[idx], y_free[idx]]
+                if all(np.linalg.norm(np.array(pt) - np.array(prev_pt)) > 10 for prev_pt in potential_pts):
+                    potential_pts.append(pt)
+                if len(potential_pts) >= 4: break
+            self.publish_potential_points_marker(potential_pts)
+
+        # ==========================================================
+        # 策略 (2): 核心决策 - 寻找附近的高分认知区域
+        # ==========================================================
+        nearby_high_score_mask = (map_np > 0.6) & (free_mask > 0) & distance_mask
+        y_high, x_high = np.where(nearby_high_score_mask)
+
+        if len(x_high) > 0:
+            # 这里依然保留“最近”逻辑，因为高分区域通常是急需探测的局部目标
+            dists = np.sqrt((x_high - robot_pose_px[0]) ** 2 + (y_high - robot_pose_px[1]) ** 2)
+            nearest_idx = np.argmin(dists)
+            target_px = [x_high[nearest_idx], y_high[nearest_idx]]
+            return torch.tensor(target_px, dtype=torch.int64, device=self.device)
+
+        # ==========================================================
+        # 策略 (3): 兜底逻辑 - 寻找【前方】的边界点 (Frontier)
+        # ==========================================================
+        else:
+            rospy.loginfo("--- [Mode: 边界探索] 寻找机器人前方的最佳边界 ---")
+            frontiers = self.FrontierExtractor.get_latest_frontier_centroids()
+
+            if not frontiers:
+                return None
+
+            best_f_px = None
+            max_score = -float('inf')
+
+            # 评分权重配置
+            W_ANGLE = 0.7  # 越倾向于正前方，权重越大
+            W_DIST = 0.3  # 越倾向于近处，权重越大
+
+            for f_world in frontiers:
+                # 转换到像素坐标
+                f_x_px = int(
+                    (f_world[0] - self.FrontierExtractor.target_origin_x) / self.FrontierExtractor.target_cell_size)
+                f_y_px = int(
+                    (f_world[1] - self.FrontierExtractor.target_origin_y) / self.FrontierExtractor.target_cell_size)
+
+                if 0 <= f_x_px < W and 0 <= f_y_px < H:
+                    dx = f_x_px - robot_pose_px[0]
+                    dy = f_y_px - robot_pose_px[1]
+                    dist = np.sqrt(dx ** 2 + dy ** 2)
+
+                    if dist < 5: continue  # 过滤掉离机器人太近的点
+
+                    # --- 计算角度得分 ---
+                    # 目标相对于机器人的绝对角度
+                    angle_to_target = np.arctan2(dy, dx)
+                    # 计算与当前朝向的偏差
+                    angle_diff = angle_to_target - robot_yaw
+                    # 归一化到 [-pi, pi]
+                    angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
+
+                    # 使用余弦值作为得分：正前方为 1.0, 正后方为 -1.0
+                    angle_score = np.cos(angle_diff)
+
+                    # --- 计算距离得分 ---
+                    # 距离越近得分越高 (归一化到 0-1 之间，假设 200 像素是远距离)
+                    dist_score = 1.0 / (1.0 + dist * 0.02)
+
+                    # --- 综合评分 ---
+                    total_score = (W_ANGLE * angle_score) + (W_DIST * dist_score)
+
+                    if total_score > max_score:
+                        max_score = total_score
+                        best_f_px = [f_x_px, f_y_px]
+
+            if best_f_px is not None:
+                rospy.loginfo(f"--- [LTG] 选定前方边界点: {best_f_px}, 得分: {max_score:.2f} ---")
+                return torch.tensor(best_f_px, dtype=torch.int64, device=self.device)
+
+            return None
 
 
     # （1）将自由区间内score大于0.6的点，选出来，从中选择一个最近的点

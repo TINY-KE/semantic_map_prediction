@@ -21,6 +21,7 @@ class SemanticMarkerPublisher:
         self.pub_filtered = rospy.Publisher(filtered_topic, Marker, queue_size=10)
 
         self.color_palette = self._get_custom_semantic_colors()
+
         rospy.loginfo(f"双重语义发布器启动: \n 原图: {raw_topic} \n 过滤图: {filtered_topic}")
 
     def _get_custom_semantic_colors(self):
@@ -60,27 +61,17 @@ class SemanticMarkerPublisher:
         return marker
 
     def publish_semantic_map(self, ego_grid_sseg, free_mask=None, res=0.1, origin_x=-15.0, origin_y=-15.0, height=0.0,
-                             max_area=[-100, 100, -100, 100]):
+                             max_area=[-100, 100, -100, 100], y_offset_cells = 0):
         # 1. 数据预处理
         sseg_np = self._to_numpy(ego_grid_sseg)
         if sseg_np.ndim == 4: sseg_np = sseg_np.squeeze(0)
-        raw_indices = np.argmax(sseg_np, axis=0)  # 原始类别图 [H, W]
+        raw_indices = np.argmax(sseg_np, axis=0)
 
-        # 2. 准备 Marker
-        frame_id = "map"
-        raw_marker = self._create_marker("raw_semantic", frame_id, res, height)
+        # 2. 准备偏移量 (米)
+        offset_y_meters = y_offset_cells * res
 
-        filtered_marker = None
-        filtered_indices = None
-        if free_mask is not None:
-            filtered_marker = self._create_marker("free_filtered_semantic", frame_id, res, height + 0.02)
-            f_mask_np = self._to_numpy(free_mask)
-            if f_mask_np.ndim == 3: f_mask_np = f_mask_np.squeeze(0)
-            # 仅保留空闲区域，其余设为 -1
-            filtered_indices = np.where(f_mask_np > 0, raw_indices, -1)
-
-        # 3. 核心提取函数 (内部闭包优化性能)
-        def fill_marker(target_marker, indices_map):
+        # 3. 内部填充函数：增加 offset 参数
+        def fill_marker(target_marker, indices_map, y_offset=0.0):
             min_x, max_x, min_y, max_y = max_area
             for cat in range(27):
                 y_idx, x_idx = np.where(indices_map == cat)
@@ -89,22 +80,33 @@ class SemanticMarkerPublisher:
                 px = x_idx * res + origin_x
                 py = y_idx * res + origin_y
 
-                # 物理边界过滤
+                # 物理边界过滤 (注意：边界判定通常基于原始位置)
                 mask = (px >= min_x) & (px <= max_x) & (py >= min_y) & (py <= max_y)
                 px_f, py_f = px[mask], py[mask]
-                if len(px_f) == 0: continue
 
                 color = ColorRGBA(*self.color_palette[cat])
                 for x, y in zip(px_f, py_f):
-                    target_marker.points.append(Point(x, y, height))
+                    # 关键点：在发布坐标时加上偏移
+                    target_marker.points.append(Point(x, y + y_offset, height))
                     target_marker.colors.append(color)
 
-        # 4. 执行填充与发布
-        fill_marker(raw_marker, raw_indices)
+        # 4. 发布原图 (偏移为 0)
+        raw_marker = self._create_marker("raw_semantic", "map", res, height)
+        fill_marker(raw_marker, raw_indices, y_offset=0.0)
         self.pub_raw.publish(raw_marker)
 
-        if filtered_marker is not None:
-            fill_marker(filtered_marker, filtered_indices)
+        # 5. 发布过滤图 (带偏移)
+        if free_mask is not None:
+            f_mask_np = self._to_numpy(free_mask)
+            if f_mask_np.ndim == 3: f_mask_np = f_mask_np.squeeze(0)
+            if f_mask_np.shape != raw_indices.shape: f_mask_np = f_mask_np.T
+
+            # 仅保留在 free_mask 区域内的索引
+            filtered_indices = np.where(f_mask_np > 0, raw_indices, -1)
+
+            filtered_marker = self._create_marker("free_filtered_semantic", "map", res, height + 0.02)
+            # 同步偏移：地图内容被 mask 截取后，整体平移 offset_y_meters
+            fill_marker(filtered_marker, filtered_indices, y_offset=offset_y_meters)
             self.pub_filtered.publish(filtered_marker)
 
         rospy.loginfo_once("Dual Semantic Markers Published.")
@@ -118,7 +120,7 @@ class AsyncDualSemanticPublisher(SemanticMarkerPublisher):
         self.is_running = True
         self.publish_thread = threading.Thread(target=self._worker, daemon=True)
         self.publish_thread.start()
-
+        self.y_offset_cells = 40
     def _worker(self):
         while self.is_running and not rospy.is_shutdown():
             try:
@@ -131,10 +133,10 @@ class AsyncDualSemanticPublisher(SemanticMarkerPublisher):
                 rospy.logerr(f"Async Publish Error: {e}")
 
     def async_publish(self, ego_grid_sseg, free_mask=None, res=0.1, origin_x=-10.0, origin_y=-10.0, height=0.0,
-                      max_area=[-500, 500, -500, 500]):
+                      max_area=[-500, 500, -500, 500], y_offset_cells = 0):
         try:
             if self.publish_queue.full(): self.publish_queue.get_nowait()
-            self.publish_queue.put_nowait((ego_grid_sseg, free_mask, res, origin_x, origin_y, height, max_area))
+            self.publish_queue.put_nowait((ego_grid_sseg, free_mask, res, origin_x, origin_y, height, max_area, y_offset_cells))
         except Exception as e:
             rospy.logerr(f"Queue Error: {e}")
 
@@ -167,6 +169,7 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
         self.is_running = True
         self.publish_thread = threading.Thread(target=self._worker, daemon=True)
         self.publish_thread.start()
+        # self.y_offset_cells = -45  # 默认值
         rospy.loginfo(f"🚀 异步不确定性发布器(自动降维集成版)启动")
 
     def _worker(self):
@@ -179,7 +182,7 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
                 continue
 
     def async_publish(self, uncertainty_grid, free_mask=None, res=0.1, origin_x=-15.0, origin_y=-15.0, height=0.0,
-                      max_area=[-100, 100, -100, 100], threshold=0.05, robot_pose_px = None):
+                      max_area=[-100, 100, -100, 100], threshold=0.05, robot_pose_px = None, y_offset_cells = 0):
         """
         现在你可以直接传入 sg.per_class_uncertainty_map [B, 27, H, W]
         """
@@ -190,88 +193,14 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
                 self.publish_queue.get_nowait()
 
             self.publish_queue.put_nowait(
-                (uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold, robot_pose_px))
+                (uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold, robot_pose_px, y_offset_cells))
         except Exception as e:
             rospy.logerr(f"Uncertainty Queue Error: {e}")
 
-    # def process_and_publish(self, uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold):
-    #     # ========== 1. 维度处理（保持不变） ==========
-    #     unc_np = self._to_numpy(uncertainty_grid)
-    #     if unc_np.ndim == 4:
-    #         uncertainty_grid, _ = torch.max(uncertainty_grid, dim=1)
-    #         unc_np = self._to_numpy(uncertainty_grid)
-    #     if unc_np.ndim == 3:
-    #         unc_np = unc_np.squeeze(0)  # 最终维度 [H, W]
-    #
-    #     # ========== 2. Free Mask 处理（保持不变） ==========
-    #     f_mask_np = None
-    #     if free_mask is not None:
-    #         f_mask_np = self._to_numpy(free_mask)
-    #         if f_mask_np.ndim == 3:
-    #             f_mask_np = f_mask_np.squeeze(0)
-    #         # 强制对齐 mask 维度（关键：和语义图保持一致）
-    #         if f_mask_np.shape != unc_np.shape:
-    #             f_mask_np = f_mask_np.T
-    #             rospy.logwarn(f"Uncertainty mask维度({f_mask_np.shape})自动转置为{unc_np.shape}")
-    #
-    #     # ========== 3. 完全复刻语义发布器的 max_area 过滤逻辑 ==========
-    #     frame_id = "map"
-    #     raw_marker = self._create_marker("raw_unc", frame_id, res, height)
-    #     aligned_marker = self._create_marker("aligned_unc", frame_id, res, height + 0.01)
-    #
-    #     # 核心修复：复用语义发布器的 fill_marker 逻辑（仅修改颜色映射）
-    #     def fill_unc_marker(target_marker, unc_map, use_free_mask=False):
-    #         min_x, max_x, min_y, max_y = max_area
-    #         # 遍历所有栅格（和语义发布器一致：逐点判断，而非先筛选再过滤）
-    #         for y_idx in range(unc_map.shape[0]):
-    #             for x_idx in range(unc_map.shape[1]):
-    #                 # 1. 不确定性阈值过滤（threshold=0 时不生效）
-    #                 if unc_map[y_idx, x_idx] <= threshold:
-    #                     continue
-    #
-    #                 # 2. 计算物理坐标（和语义发布器完全一致）
-    #                 px = x_idx * res + origin_x
-    #                 py = y_idx * res + origin_y
-    #
-    #                 # 3. max_area 过滤（和语义发布器完全一致）
-    #                 if not (min_x <= px <= max_x and min_y <= py <= max_y):
-    #                     continue
-    #
-    #                 # 4. Free Mask 过滤（仅 aligned_marker 使用）
-    #                 if use_free_mask and f_mask_np is not None:
-    #                     # 确保 mask 索引和栅格索引一致
-    #                     if not f_mask_np[y_idx, x_idx]:
-    #                         continue
-    #
-    #                 # 5. 颜色映射（保留）
-    #                 vmax = np.max(unc_map) if np.max(unc_map) > 0 else 1.0
-    #                 norm_val = np.clip(unc_map[y_idx, x_idx] / vmax, 0.0, 1.0)
-    #                 color_rgba = self.cmap(norm_val)
-    #
-    #                 # 6. 添加点（和语义发布器一致）
-    #                 point = Point(px, py, height if not use_free_mask else height + 0.01)
-    #                 color = ColorRGBA(color_rgba[0], color_rgba[1], color_rgba[2], 0.8)
-    #                 target_marker.points.append(point)
-    #                 target_marker.colors.append(color)
-    #
-    #     # ========== 4. 执行填充和发布 ==========
-    #     # 填充 raw_unc（仅 max_area 过滤，无 free_mask）
-    #     fill_unc_marker(raw_marker, unc_np, use_free_mask=False)
-    #     # 填充 aligned_unc（max_area + free_mask 过滤）
-    #     fill_unc_marker(aligned_marker, unc_np, use_free_mask=True)
-    #
-    #     # 空值处理（避免 RViz 报错）
-    #     if len(raw_marker.points) == 0:
-    #         raw_marker.action = Marker.DELETE
-    #     if len(aligned_marker.points) == 0:
-    #         aligned_marker.action = Marker.DELETE
-    #
-    #     # 发布
-    #     self.pub_raw.publish(raw_marker)
-    #     self.pub_filtered.publish(aligned_marker)
+
 
     def process_and_publish(self, uncertainty_grid, free_mask, res, origin_x, origin_y, height, max_area, threshold,
-                            robot_pose_px):
+                            robot_pose_px, y_offset_cells):
         # 1. 维度处理
         unc_np = self._to_numpy(uncertainty_grid)
         if unc_np.ndim == 4:
@@ -337,12 +266,28 @@ class AsyncUncertaintyMarkerPublisher(SemanticMarkerPublisher):
             f_mask_at_pts = free_mask[y_idx, x_idx] > 0
 
             indices = np.where(f_mask_at_pts)[0]
-            aligned_marker.points = [Point(px[i], py[i], height + 0.01) for i in indices]
-            aligned_marker.colors = [colors[i] for i in indices]
-            aligned_marker.scale.x = aligned_marker.scale.y = display_res
-        else:
-            aligned_marker.points = [Point(x, y, height + 0.01) for x, y in zip(px, py)]
-            aligned_marker.colors = colors
+            # 👇 只对过滤后的点应用 Y 轴偏移（30格）
+            offset_y_meters = y_offset_cells * res  # 30格 × 分辨率
 
-        self.pub_raw.publish(raw_marker)
-        self.pub_filtered.publish(aligned_marker)
+            # 8. 快速构建 Raw Marker (无偏移)
+            raw_marker = self._create_marker("raw_unc", "map", display_res, height)
+            raw_marker.points = [Point(x, y, height) for x, y in zip(px, py)]
+            raw_marker.colors = [ColorRGBA(c[0], c[1], c[2], 0.8) for c in colors_rgba]
+            self.pub_raw.publish(raw_marker)
+
+            # 9. 构建 Aligned Marker (内容被 mask 过滤，但坐标整体偏移)
+            if free_mask is not None:
+                if free_mask.shape != unc_np.shape: free_mask = free_mask.T
+                # 在原始索引位置采样 mask
+                f_mask_at_pts = free_mask[y_idx, x_idx] > 0
+                indices = np.where(f_mask_at_pts)[0]
+
+                aligned_marker = self._create_marker("aligned_unc", "map", display_res, height + 0.01)
+                # 关键：px[i], py[i] 是原位置，加 offset 变成偏移位置
+                aligned_marker.points = [
+                    Point(px[i], py[i] + offset_y_meters, height + 0.01)
+                    for i in indices
+                ]
+                aligned_marker.colors = [ColorRGBA(colors_rgba[i][0], colors_rgba[i][1], colors_rgba[i][2], 0.8) for i in
+                                         indices]
+                self.pub_filtered.publish(aligned_marker)
